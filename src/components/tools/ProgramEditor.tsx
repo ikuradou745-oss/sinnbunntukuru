@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile } from '../../types/user';
 import { ProgramToolItem, SpriteItem, ProgramEventScript, ProgramBlock } from '../../types/tools';
-import { saveProgram } from '../../services/toolStorage';
+import { saveOnlineProgram } from '../../services/toolStorage';
 import { SpriteCanvas } from './SpriteCanvas';
 import { GameRuntime } from './GameRuntime';
+import { ValueInput } from './ValueInput';
 import {
   Code2,
   ArrowLeft,
@@ -11,16 +12,15 @@ import {
   Plus,
   Trash2,
   Play,
-  Layers,
   Gamepad2,
   Blocks,
   Image as ImageIcon,
   User,
-  PlusCircle,
   Paintbrush,
   Eraser,
   PaintBucket,
-  AlertCircle,
+  Search,
+  Repeat,
 } from 'lucide-react';
 
 interface ProgramEditorProps {
@@ -36,6 +36,15 @@ const BG_PALETTE = [
   '#15803d', '#1e40af', '#b45309', '#7f1d1d',
 ];
 
+// Generate default variables: スコア1 〜 スコア10
+const createDefaultScoreVariables = (): Record<string, number> => {
+  const vars: Record<string, number> = {};
+  for (let i = 1; i <= 10; i++) {
+    vars[`スコア${i}`] = 0;
+  }
+  return vars;
+};
+
 export const ProgramEditor: React.FC<ProgramEditorProps> = ({
   user,
   onBack,
@@ -49,7 +58,9 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
   const [sprites, setSprites] = useState<SpriteItem[]>([]);
   const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
   const [activeNumberKeys, setActiveNumberKeys] = useState<number[]>([1, 2]);
-  const [variables, setVariables] = useState<Record<string, number>>({ 'スコア': 0 });
+  
+  // Variables (with スコア1〜10 pre-loaded)
+  const [variables, setVariables] = useState<Record<string, number>>(createDefaultScoreVariables());
   const [newVarName, setNewVarName] = useState<string>('');
   const [scripts, setScripts] = useState<ProgramEventScript[]>([]);
 
@@ -66,7 +77,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
 
   // Initialize Background & Starter Sprites
   useEffect(() => {
-    // Default background: pale gray floor with borders
+    // Default background
     const bgC = document.createElement('canvas');
     bgC.width = 128;
     bgC.height = 128;
@@ -74,7 +85,6 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     ctx.fillStyle = '#f8fafc';
     ctx.fillRect(0, 0, 128, 128);
 
-    // Subtle grid
     ctx.strokeStyle = '#e2e8f0';
     for (let i = 0; i < 128; i += 16) {
       ctx.beginPath();
@@ -91,7 +101,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     setBackgroundDataUrl(bgUrl);
     loadBgToCanvas(bgUrl);
 
-    // Initial Starter Sprite 1: 主人公 (Blue slime/character)
+    // Initial Starter Sprite 1: 主人公
     const spC = document.createElement('canvas');
     spC.width = 16;
     spC.height = 16;
@@ -101,21 +111,37 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     spCtx.fillStyle = '#ffffff';
     spCtx.fillRect(4, 5, 3, 3);
     spCtx.fillRect(9, 5, 3, 3);
-    spCtx.fillStyle = '#1e3a8a';
-    spCtx.fillRect(5, 6, 1, 1);
-    spCtx.fillRect(10, 6, 1, 1);
 
-    const initSprite: SpriteItem = {
-      id: 'sp-1',
+    // Initial Starter Sprite 2: 宝箱 (Chest)
+    const spC2 = document.createElement('canvas');
+    spC2.width = 16;
+    spC2.height = 16;
+    const spCtx2 = spC2.getContext('2d')!;
+    spCtx2.fillStyle = '#b45309';
+    spCtx2.fillRect(2, 4, 12, 9);
+    spCtx2.fillStyle = '#f59e0b';
+    spCtx2.fillRect(7, 7, 2, 3);
+
+    const initSprite1: SpriteItem = {
+      id: 'sp-player',
       name: '主人公',
       dataUrl: spC.toDataURL('image/png'),
       initialX: 32,
       initialY: 48,
     };
-    setSprites([initSprite]);
-    setSelectedSpriteId(initSprite.id);
 
-    // Starter Scripts: Arrow keys move player
+    const initSprite2: SpriteItem = {
+      id: 'sp-chest',
+      name: '宝箱',
+      dataUrl: spC2.toDataURL('image/png'),
+      initialX: 80,
+      initialY: 48,
+    };
+
+    setSprites([initSprite1, initSprite2]);
+    setSelectedSpriteId(initSprite1.id);
+
+    // Starter Scripts with 検査 (Collision check)
     const starterScripts: ProgramEventScript[] = [
       {
         id: 'sc-start',
@@ -125,7 +151,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             id: 'b-start-msg',
             category: 'feature',
             featureAction: 'show_dialog',
-            featureText: 'ゲームスタート！矢印キーで動かそう',
+            featureText: 'ゲームスタート！宝箱に触れてみよう',
           },
         ],
       },
@@ -137,9 +163,23 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             id: 'b-act-up',
             category: 'action',
             actionType: 'move_step',
-            spriteId: 'sp-1',
+            spriteId: 'sp-player',
             direction: 'up',
             steps: 8,
+          },
+          {
+            id: 'b-check-touch',
+            category: 'check',
+            checkSpriteA: 'sp-player',
+            checkSpriteB: 'sp-chest',
+            childBlocks: [
+              {
+                id: 'b-touch-msg',
+                category: 'feature',
+                featureAction: 'show_dialog',
+                featureText: '宝箱に触れた！1キーで開けよう',
+              },
+            ],
           },
         ],
       },
@@ -151,9 +191,23 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             id: 'b-act-down',
             category: 'action',
             actionType: 'move_step',
-            spriteId: 'sp-1',
+            spriteId: 'sp-player',
             direction: 'down',
             steps: 8,
+          },
+          {
+            id: 'b-check-touch-d',
+            category: 'check',
+            checkSpriteA: 'sp-player',
+            checkSpriteB: 'sp-chest',
+            childBlocks: [
+              {
+                id: 'b-touch-msg-d',
+                category: 'feature',
+                featureAction: 'show_dialog',
+                featureText: '宝箱に触れた！1キーで開けよう',
+              },
+            ],
           },
         ],
       },
@@ -165,9 +219,23 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             id: 'b-act-left',
             category: 'action',
             actionType: 'move_step',
-            spriteId: 'sp-1',
+            spriteId: 'sp-player',
             direction: 'left',
             steps: 8,
+          },
+          {
+            id: 'b-check-touch-l',
+            category: 'check',
+            checkSpriteA: 'sp-player',
+            checkSpriteB: 'sp-chest',
+            childBlocks: [
+              {
+                id: 'b-touch-msg-l',
+                category: 'feature',
+                featureAction: 'show_dialog',
+                featureText: '宝箱に触れた！1キーで開けよう',
+              },
+            ],
           },
         ],
       },
@@ -179,9 +247,50 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             id: 'b-act-right',
             category: 'action',
             actionType: 'move_step',
-            spriteId: 'sp-1',
+            spriteId: 'sp-player',
             direction: 'right',
             steps: 8,
+          },
+          {
+            id: 'b-check-touch-r',
+            category: 'check',
+            checkSpriteA: 'sp-player',
+            checkSpriteB: 'sp-chest',
+            childBlocks: [
+              {
+                id: 'b-touch-msg-r',
+                category: 'feature',
+                featureAction: 'show_dialog',
+                featureText: '宝箱に触れた！1キーで開けよう',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'sc-key1',
+        eventBlock: { id: 'b-k1', category: 'event', eventType: 'key_num', keyNum: 1 },
+        actionBlocks: [
+          {
+            id: 'b-check-k1',
+            category: 'check',
+            checkSpriteA: 'sp-player',
+            checkSpriteB: 'sp-chest',
+            childBlocks: [
+              {
+                id: 'b-add-score',
+                category: 'variable',
+                varName: 'スコア1',
+                varOp: 'add',
+                varValue: 10,
+              },
+              {
+                id: 'b-show-score',
+                category: 'feature',
+                featureAction: 'show_dialog',
+                featureText: '宝箱を開けた！スコア1: {スコア1}',
+              },
+            ],
           },
         ],
       },
@@ -253,7 +362,20 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
   };
 
   // Total blocks counter (Max 1000)
-  const totalBlocks = scripts.reduce((acc, s) => acc + 1 + s.actionBlocks.length, 0);
+  const countBlocks = (blocks: ProgramBlock[]): number => {
+    return blocks.reduce((acc, b) => {
+      let count = 1;
+      if (b.childBlocks && b.childBlocks.length > 0) {
+        count += countBlocks(b.childBlocks);
+      }
+      return acc + count;
+    }, 0);
+  };
+
+  const totalBlocks = scripts.reduce((acc, s) => acc + 1 + countBlocks(s.actionBlocks), 0);
+
+  // Variable list
+  const varNames = Object.keys(variables);
 
   // Add new sprite (Max 7)
   const handleAddSprite = () => {
@@ -293,7 +415,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     }
   };
 
-  // Add Variable
+  // Add Custom Variable
   const handleAddVariable = (e: React.FormEvent) => {
     e.preventDefault();
     const vName = newVarName.trim();
@@ -302,40 +424,128 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     setNewVarName('');
   };
 
-  // Add Action block to a script stack
-  const handleAddActionBlock = (scriptId: string, category: 'action' | 'feature' | 'variable') => {
-    if (totalBlocks >= 1000) return;
+  // Create a block instance
+  const createNewBlock = (category: ProgramBlock['category']): ProgramBlock => {
+    const defaultSprite = sprites[0]?.id || '';
+    const secondSprite = sprites[1]?.id || sprites[0]?.id || '';
+    const defaultVar = varNames[0] || 'スコア1';
 
-    let newBlock: ProgramBlock;
     if (category === 'action') {
-      newBlock = {
-        id: 'blk-' + Date.now(),
+      return {
+        id: 'blk-' + Date.now() + '-' + Math.random(),
         category: 'action',
         actionType: 'move_step',
-        spriteId: sprites[0]?.id || '',
+        spriteId: defaultSprite,
         direction: 'up',
         steps: 8,
       };
     } else if (category === 'feature') {
-      newBlock = {
-        id: 'blk-' + Date.now(),
+      return {
+        id: 'blk-' + Date.now() + '-' + Math.random(),
         category: 'feature',
         featureAction: 'show_dialog',
         featureText: 'こんにちは！',
       };
-    } else {
-      const firstVar = Object.keys(variables)[0] || 'スコア';
-      newBlock = {
-        id: 'blk-' + Date.now(),
+    } else if (category === 'variable') {
+      return {
+        id: 'blk-' + Date.now() + '-' + Math.random(),
         category: 'variable',
-        varName: firstVar,
+        varName: defaultVar,
         varOp: 'add',
         varValue: 1,
       };
+    } else if (category === 'check') {
+      return {
+        id: 'blk-' + Date.now() + '-' + Math.random(),
+        category: 'check',
+        checkSpriteA: defaultSprite,
+        checkSpriteB: secondSprite,
+        childBlocks: [],
+      };
+    } else {
+      // Loop
+      return {
+        id: 'blk-' + Date.now() + '-' + Math.random(),
+        category: 'loop',
+        repeatType: 'count',
+        repeatCount: 5,
+        childBlocks: [],
+      };
     }
+  };
 
+  // Add Action block to top-level script stack
+  const handleAddActionBlock = (scriptId: string, category: ProgramBlock['category']) => {
+    if (totalBlocks >= 1000) return;
+    const newBlock = createNewBlock(category);
     setScripts(
       scripts.map((s) => (s.id === scriptId ? { ...s, actionBlocks: [...s.actionBlocks, newBlock] } : s))
+    );
+  };
+
+  // Add nested block inside Check or Loop block
+  const handleAddChildBlock = (parentBlock: ProgramBlock, category: ProgramBlock['category']) => {
+    if (totalBlocks >= 1000) return;
+    const child = createNewBlock(category);
+
+    const updateBlockTree = (blocks: ProgramBlock[]): ProgramBlock[] => {
+      return blocks.map((b) => {
+        if (b.id === parentBlock.id) {
+          return { ...b, childBlocks: [...(b.childBlocks || []), child] };
+        }
+        if (b.childBlocks && b.childBlocks.length > 0) {
+          return { ...b, childBlocks: updateBlockTree(b.childBlocks) };
+        }
+        return b;
+      });
+    };
+
+    setScripts(
+      scripts.map((s) => ({
+        ...s,
+        actionBlocks: updateBlockTree(s.actionBlocks),
+      }))
+    );
+  };
+
+  // Remove block anywhere in tree
+  const handleRemoveBlockFromTree = (blockId: string) => {
+    const removeRecursive = (blocks: ProgramBlock[]): ProgramBlock[] => {
+      return blocks
+        .filter((b) => b.id !== blockId)
+        .map((b) => ({
+          ...b,
+          childBlocks: b.childBlocks ? removeRecursive(b.childBlocks) : [],
+        }));
+    };
+
+    setScripts(
+      scripts.map((s) => ({
+        ...s,
+        actionBlocks: removeRecursive(s.actionBlocks),
+      }))
+    );
+  };
+
+  // Update a single block's field in tree
+  const handleUpdateBlockInTree = (blockId: string, updater: (b: ProgramBlock) => ProgramBlock) => {
+    const updateRecursive = (blocks: ProgramBlock[]): ProgramBlock[] => {
+      return blocks.map((b) => {
+        if (b.id === blockId) {
+          return updater(b);
+        }
+        if (b.childBlocks && b.childBlocks.length > 0) {
+          return { ...b, childBlocks: updateRecursive(b.childBlocks) };
+        }
+        return b;
+      });
+    };
+
+    setScripts(
+      scripts.map((s) => ({
+        ...s,
+        actionBlocks: updateRecursive(s.actionBlocks),
+      }))
     );
   };
 
@@ -355,24 +565,13 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     setScripts([...scripts, newScript]);
   };
 
-  // Remove block from script
-  const handleRemoveBlock = (scriptId: string, blockId: string) => {
-    setScripts(
-      scripts.map((s) =>
-        s.id === scriptId
-          ? { ...s, actionBlocks: s.actionBlocks.filter((b) => b.id !== blockId) }
-          : s
-      )
-    );
-  };
-
   // Remove entire script stack
   const handleRemoveScript = (scriptId: string) => {
     setScripts(scripts.filter((s) => s.id !== scriptId));
   };
 
-  // Publish Program
-  const handlePublish = () => {
+  // Publish Program Online
+  const handlePublish = async () => {
     const trimmed = title.trim();
     if (trimmed.length < 2 || trimmed.length > 20) {
       setPublishError('タイトルは2〜20文字で入力してください。');
@@ -398,7 +597,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
       scripts,
     };
 
-    const res = saveProgram(programItem);
+    const res = await saveOnlineProgram(programItem);
     if (!res.success) {
       setPublishError(res.message || '保存に失敗しました。');
       return;
@@ -406,6 +605,339 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
 
     setIsPublishModalOpen(false);
     onPublished();
+  };
+
+  // Render individual block (with nested blocks support for 検査 and 繰り返し)
+  const renderBlockItem = (block: ProgramBlock, depth = 0) => {
+    return (
+      <div
+        key={block.id}
+        className={`rounded-2xl border shadow-2xs transition-all ${
+          block.category === 'check'
+            ? 'bg-purple-50/70 border-purple-300'
+            : block.category === 'loop'
+            ? 'bg-amber-50/70 border-amber-300'
+            : 'bg-white border-neutral-300'
+        } p-3 text-xs`}
+        style={{ marginLeft: `${depth * 16}px` }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          
+          {/* 1. ACTION (動作) */}
+          {block.category === 'action' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[10px]">
+                動作
+              </span>
+              <select
+                value={block.actionType}
+                onChange={(e) => {
+                  const val = e.target.value as 'move_step' | 'set_pos';
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, actionType: val }));
+                }}
+                className="bg-neutral-100 border border-neutral-300 rounded px-1.5 py-1 font-bold text-xs"
+              >
+                <option value="move_step">動かす</option>
+                <option value="set_pos">座標指定</option>
+              </select>
+
+              <select
+                value={block.spriteId}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, spriteId: val }));
+                }}
+                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold text-xs"
+              >
+                {sprites.map((sp) => (
+                  <option key={sp.id} value={sp.id}>
+                    {sp.name}
+                  </option>
+                ))}
+              </select>
+
+              <span>を</span>
+
+              {block.actionType === 'move_step' ? (
+                <>
+                  <ValueInput
+                    value={block.steps}
+                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, steps: val }))}
+                    availableVariables={varNames}
+                    defaultValue={8}
+                  />
+                  <span>マス</span>
+                  <select
+                    value={block.direction}
+                    onChange={(e) => {
+                      const val = e.target.value as 'up' | 'down' | 'left' | 'right';
+                      handleUpdateBlockInTree(block.id, (b) => ({ ...b, direction: val }));
+                    }}
+                    className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+                  >
+                    <option value="up">上</option>
+                    <option value="down">下</option>
+                    <option value="left">左</option>
+                    <option value="right">右</option>
+                  </select>
+                  <span>に動かす</span>
+                </>
+              ) : (
+                <>
+                  <span>左から</span>
+                  <ValueInput
+                    value={block.posX}
+                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posX: val }))}
+                    availableVariables={varNames}
+                    defaultValue={32}
+                  />
+                  <span>マス、上から</span>
+                  <ValueInput
+                    value={block.posY}
+                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posY: val }))}
+                    availableVariables={varNames}
+                    defaultValue={48}
+                  />
+                  <span>マスにする</span>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* 2. FEATURE (機能) */}
+          {block.category === 'feature' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold text-[10px]">
+                機能
+              </span>
+              <select
+                value={block.featureAction}
+                onChange={(e) => {
+                  const val = e.target.value as 'show_dialog' | 'hide_dialog';
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, featureAction: val }));
+                }}
+                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+              >
+                <option value="show_dialog">テキストダイアログを表示</option>
+                <option value="hide_dialog">テキストダイアログを閉じる</option>
+              </select>
+
+              {block.featureAction === 'show_dialog' && (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    maxLength={20}
+                    value={block.featureText || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      handleUpdateBlockInTree(block.id, (b) => ({ ...b, featureText: val }));
+                    }}
+                    placeholder="20文字まで (例: スコア1: {スコア1})"
+                    className="w-48 bg-neutral-100 border border-neutral-300 rounded px-2 py-1 text-xs"
+                  />
+                  <select
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const text = (block.featureText || '') + `{${e.target.value}}`;
+                      handleUpdateBlockInTree(block.id, (b) => ({ ...b, featureText: text }));
+                    }}
+                    value=""
+                    className="bg-neutral-100 border border-neutral-300 rounded px-1.5 py-1 text-[11px] text-neutral-600"
+                  >
+                    <option value="">+ 変数を挿入</option>
+                    {varNames.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 3. VARIABLE (変数) */}
+          {block.category === 'variable' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-pink-100 text-pink-800 rounded font-bold text-[10px]">
+                変数
+              </span>
+              <span>変数</span>
+              <select
+                value={block.varName}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, varName: val }));
+                }}
+                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+              >
+                {varNames.map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+              <span>の値を</span>
+              <ValueInput
+                value={block.varValue}
+                onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, varValue: val }))}
+                availableVariables={varNames}
+                defaultValue={1}
+              />
+              <span>に</span>
+              <select
+                value={block.varOp}
+                onChange={(e) => {
+                  const val = e.target.value as 'set' | 'add' | 'sub';
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, varOp: val }));
+                }}
+                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+              >
+                <option value="add">足す (+)</option>
+                <option value="sub">減らす (-)</option>
+                <option value="set">する (=)</option>
+              </select>
+            </div>
+          )}
+
+          {/* 4. CHECK (検査: 〇〇が〇〇に触れていたら) */}
+          {block.category === 'check' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-purple-600 text-white rounded font-bold text-[10px]">
+                検査 (条件)
+              </span>
+              <span className="font-bold text-purple-900">もし</span>
+              <select
+                value={block.checkSpriteA}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, checkSpriteA: val }));
+                }}
+                className="bg-white border border-purple-300 rounded px-2 py-1 font-bold text-xs"
+              >
+                {sprites.map((sp) => (
+                  <option key={sp.id} value={sp.id}>
+                    {sp.name}
+                  </option>
+                ))}
+              </select>
+              <span className="font-bold text-purple-900">が</span>
+              <select
+                value={block.checkSpriteB}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, checkSpriteB: val }));
+                }}
+                className="bg-white border border-purple-300 rounded px-2 py-1 font-bold text-xs"
+              >
+                {sprites.map((sp) => (
+                  <option key={sp.id} value={sp.id}>
+                    {sp.name}
+                  </option>
+                ))}
+              </select>
+              <span className="font-bold text-purple-900">に触れていたら：</span>
+            </div>
+          )}
+
+          {/* 5. LOOP (繰り返し: 〇〇回またはずっと) */}
+          {block.category === 'loop' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-amber-600 text-white rounded font-bold text-[10px]">
+                繰り返し
+              </span>
+              <select
+                value={block.repeatType}
+                onChange={(e) => {
+                  const val = e.target.value as 'count' | 'forever';
+                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, repeatType: val }));
+                }}
+                className="bg-white border border-amber-300 rounded px-2 py-1 font-bold text-xs"
+              >
+                <option value="count">回数指定</option>
+                <option value="forever">ずっと</option>
+              </select>
+
+              {block.repeatType === 'count' ? (
+                <>
+                  <ValueInput
+                    value={block.repeatCount}
+                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, repeatCount: val }))}
+                    availableVariables={varNames}
+                    defaultValue={5}
+                  />
+                  <span className="font-bold text-amber-900">回繰り返し：</span>
+                </>
+              ) : (
+                <span className="font-bold text-amber-900">ずっと繰り返し：</span>
+              )}
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => handleRemoveBlockFromTree(block.id)}
+            className="text-neutral-400 hover:text-red-600 p-1"
+            title="削除"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* NESTED CHILD BLOCKS (for 検査 & 繰り返し) */}
+        {(block.category === 'check' || block.category === 'loop') && (
+          <div className="mt-2.5 pt-2.5 border-t border-purple-200/60 pl-3 border-l-2 border-l-purple-400 space-y-2">
+            {block.childBlocks && block.childBlocks.length > 0 ? (
+              block.childBlocks.map((child) => renderBlockItem(child, depth + 1))
+            ) : (
+              <div className="text-[11px] text-neutral-400 italic">
+                （この中に実行するブロックを入れてください）
+              </div>
+            )}
+
+            {/* Add inside child block buttons */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] font-bold text-neutral-500">+ 中にブロックを追加:</span>
+              <button
+                type="button"
+                onClick={() => handleAddChildBlock(block, 'action')}
+                className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded text-[11px] font-bold border border-blue-200"
+              >
+                動作
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddChildBlock(block, 'feature')}
+                className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-bold border border-amber-200"
+              >
+                機能
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddChildBlock(block, 'variable')}
+                className="px-2 py-0.5 bg-pink-50 hover:bg-pink-100 text-pink-800 rounded text-[11px] font-bold border border-pink-200"
+              >
+                変数
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddChildBlock(block, 'check')}
+                className="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-800 rounded text-[11px] font-bold border border-purple-200"
+              >
+                検査
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddChildBlock(block, 'loop')}
+                className="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded text-[11px] font-bold border border-amber-200"
+              >
+                繰り返し
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const currentProgramForTesting: ProgramToolItem = {
@@ -444,12 +976,12 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-black text-neutral-900 leading-tight">プログラム・ゲームエディタ</h2>
-              <span className="text-[11px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
-                ※ゲームなどを作れるよ
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                ● リアルタイムオンライン
               </span>
             </div>
             <p className="text-[11px] text-neutral-500">
-              128×128 px | 背景・キャラ・ボタン・ブロックプログラミング
+              128×128 px | スコア1〜10、検査（衝突判定）、繰り返しブロック対応
             </p>
           </div>
         </div>
@@ -461,7 +993,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
           className="flex items-center gap-1.5 px-5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all active:scale-95"
         >
           <CheckCircle className="w-4 h-4 text-emerald-400" />
-          <span>完成（投稿する）</span>
+          <span>完成（オンライン投稿）</span>
         </button>
       </div>
 
@@ -626,7 +1158,6 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
       {/* TAB 2: SPRITES (Up to 7, 16x16, Initial placement) */}
       {activeTab === 'sprites' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-          {/* Sprite List & Placement map */}
           <div className="md:col-span-6 bg-white p-5 rounded-3xl border border-neutral-200 space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -709,7 +1240,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             </div>
           </div>
 
-          {/* Map Placement Editor (128x128 preview where you can drag or click to place) */}
+          {/* Map Placement Editor */}
           <div className="md:col-span-6 bg-neutral-50 p-5 rounded-3xl border border-neutral-200 flex flex-col items-center gap-3">
             <h3 className="font-bold text-xs text-neutral-700">初期配置マップ (クリックして配置)</h3>
             <p className="text-[11px] text-neutral-500">
@@ -769,7 +1300,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
         </div>
       )}
 
-      {/* TAB 3: BUTTONS (上下左右キー + 123456789追加) */}
+      {/* TAB 3: BUTTONS */}
       {activeTab === 'buttons' && (
         <div className="bg-white p-6 rounded-3xl border border-neutral-200 max-w-2xl mx-auto space-y-6">
           <div>
@@ -779,7 +1310,6 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             </p>
           </div>
 
-          {/* D-Pad Notice */}
           <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200">
             <div className="font-bold text-xs text-neutral-800 mb-1">上下左右キー (D-Pad)</div>
             <p className="text-xs text-neutral-600">
@@ -787,13 +1317,12 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             </p>
           </div>
 
-          {/* Number Keys Toggle */}
           <div className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200">
             <div className="font-bold text-xs text-neutral-800 mb-1">
               追加数字ボタン (1〜9ボタン)
             </div>
             <p className="text-xs text-neutral-600 mb-3">
-              アクション、決定、会話、道具使用などのトリガーとして使えます。クリックしてON/OFFを切り替えます。
+              クリックしてON/OFFを切り替えます。
             </p>
 
             <div className="flex flex-wrap gap-2">
@@ -819,16 +1348,21 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
         </div>
       )}
 
-      {/* TAB 4: BLOCKS (実行・動作・機能・変数) */}
+      {/* TAB 4: BLOCKS (実行・動作・機能・変数・検査・繰り返し) */}
       {activeTab === 'blocks' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
           
-          {/* Variables Manager Sidebar */}
+          {/* Variables Manager Sidebar (スコア1〜10) */}
           <div className="md:col-span-4 bg-white p-5 rounded-3xl border border-neutral-200 space-y-4">
             <div className="border-b border-neutral-200 pb-3">
-              <h3 className="font-bold text-sm text-neutral-800">変数マネージャー</h3>
-              <p className="text-[11px] text-neutral-500">
-                スコアやHPなど、変化する数を管理できます。
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-sm text-neutral-800">変数マネージャー</h3>
+                <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded">
+                  スコア1〜10完備
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-500 mt-1">
+                ブロックの値に変数を指定して動かすことができます。
               </p>
             </div>
 
@@ -837,7 +1371,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                 type="text"
                 value={newVarName}
                 onChange={(e) => setNewVarName(e.target.value)}
-                placeholder="新しい変数名 (例: HP)"
+                placeholder="カスタム変数追加 (例: HP)"
                 className="flex-1 px-3 py-1.5 bg-neutral-50 border border-neutral-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-neutral-900"
               />
               <button
@@ -848,34 +1382,36 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
               </button>
             </form>
 
-            <div className="space-y-1.5">
-              {Object.keys(variables).map((vName) => (
+            <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+              {varNames.map((vName) => (
                 <div
                   key={vName}
-                  className="flex items-center justify-between p-2 bg-neutral-50 rounded-xl text-xs font-mono"
+                  className="flex items-center justify-between p-1.5 bg-neutral-50 rounded-lg text-xs font-mono"
                 >
                   <span className="font-bold text-neutral-800">{vName}</span>
                   <div className="flex items-center gap-1.5">
-                    <span className="text-neutral-500 text-[11px]">初期値:</span>
+                    <span className="text-neutral-500 text-[10px]">初期:</span>
                     <input
                       type="number"
                       value={variables[vName]}
                       onChange={(e) =>
                         setVariables({ ...variables, [vName]: Number(e.target.value) })
                       }
-                      className="w-14 px-1.5 py-0.5 bg-white border border-neutral-300 rounded text-center text-xs"
+                      className="w-12 px-1 py-0.5 bg-white border border-neutral-300 rounded text-center text-xs"
                     />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const copy = { ...variables };
-                        delete copy[vName];
-                        setVariables(copy);
-                      }}
-                      className="text-neutral-400 hover:text-red-600 p-0.5"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {!vName.startsWith('スコア') && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const copy = { ...variables };
+                          delete copy[vName];
+                          setVariables(copy);
+                        }}
+                        className="text-neutral-400 hover:text-red-600 p-0.5"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -967,242 +1503,9 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
 
                 {/* Stacked Blocks */}
                 <div className="p-4 space-y-3 bg-neutral-50/60">
-                  {script.actionBlocks.map((block) => (
-                    <div
-                      key={block.id}
-                      className="p-3 bg-white rounded-2xl border border-neutral-300 shadow-2xs flex flex-wrap items-center justify-between gap-2 text-xs"
-                    >
-                      {/* ACTION BLOCK: 動作 */}
-                      {block.category === 'action' && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[10px]">
-                            動作
-                          </span>
-                          <select
-                            value={block.spriteId}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, spriteId: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold text-xs"
-                          >
-                            {sprites.map((sp) => (
-                              <option key={sp.id} value={sp.id}>
-                                {sp.name}
-                              </option>
-                            ))}
-                          </select>
+                  {script.actionBlocks.map((block) => renderBlockItem(block, 0))}
 
-                          <span>を</span>
-
-                          <input
-                            type="number"
-                            value={Number(block.steps ?? 8)}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, steps: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="w-14 bg-neutral-100 border border-neutral-300 rounded px-1.5 py-1 text-center font-bold"
-                          />
-                          <span>マス</span>
-
-                          <select
-                            value={block.direction}
-                            onChange={(e) => {
-                              const val = e.target.value as 'up' | 'down' | 'left' | 'right';
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, direction: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
-                          >
-                            <option value="up">上</option>
-                            <option value="down">下</option>
-                            <option value="left">左</option>
-                            <option value="right">右</option>
-                          </select>
-                          <span>に動かす</span>
-                        </div>
-                      )}
-
-                      {/* FEATURE BLOCK: 機能 (テキストダイアログ) */}
-                      {block.category === 'feature' && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold text-[10px]">
-                            機能
-                          </span>
-                          <select
-                            value={block.featureAction}
-                            onChange={(e) => {
-                              const val = e.target.value as 'show_dialog' | 'hide_dialog';
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, featureAction: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
-                          >
-                            <option value="show_dialog">テキストダイアログを表示</option>
-                            <option value="hide_dialog">テキストダイアログを閉じる</option>
-                          </select>
-
-                          {block.featureAction === 'show_dialog' && (
-                            <input
-                              type="text"
-                              maxLength={20}
-                              value={block.featureText || ''}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setScripts(
-                                  scripts.map((s) =>
-                                    s.id === script.id
-                                      ? {
-                                          ...s,
-                                          actionBlocks: s.actionBlocks.map((b) =>
-                                            b.id === block.id ? { ...b, featureText: val } : b
-                                          ),
-                                        }
-                                      : s
-                                  )
-                                );
-                              }}
-                              placeholder="20文字まで (例: スコア: {スコア})"
-                              className="w-48 bg-neutral-100 border border-neutral-300 rounded px-2 py-1 text-xs"
-                            />
-                          )}
-                        </div>
-                      )}
-
-                      {/* VARIABLE BLOCK: 変数 */}
-                      {block.category === 'variable' && (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded font-bold text-[10px]">
-                            変数
-                          </span>
-                          <span>変数</span>
-                          <select
-                            value={block.varName}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, varName: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
-                          >
-                            {Object.keys(variables).map((v) => (
-                              <option key={v} value={v}>
-                                {v}
-                              </option>
-                            ))}
-                          </select>
-                          <span>の値を</span>
-                          <input
-                            type="number"
-                            value={Number(block.varValue ?? 1)}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, varValue: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="w-16 bg-neutral-100 border border-neutral-300 rounded px-1.5 py-1 text-center font-bold"
-                          />
-                          <span>に</span>
-                          <select
-                            value={block.varOp}
-                            onChange={(e) => {
-                              const val = e.target.value as 'set' | 'add' | 'sub';
-                              setScripts(
-                                scripts.map((s) =>
-                                  s.id === script.id
-                                    ? {
-                                        ...s,
-                                        actionBlocks: s.actionBlocks.map((b) =>
-                                          b.id === block.id ? { ...b, varOp: val } : b
-                                        ),
-                                      }
-                                    : s
-                                )
-                              );
-                            }}
-                            className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
-                          >
-                            <option value="add">足す (+)</option>
-                            <option value="sub">減らす (-)</option>
-                            <option value="set">する (=)</option>
-                          </select>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveBlock(script.id, block.id)}
-                        className="text-neutral-400 hover:text-red-600 p-1"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Add action block dropdown */}
+                  {/* Add action block buttons */}
                   <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-neutral-200">
                     <span className="text-[11px] font-bold text-neutral-400">+ ブロックを追加:</span>
                     <button
@@ -1217,14 +1520,30 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                       onClick={() => handleAddActionBlock(script.id, 'feature')}
                       className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-bold border border-amber-200"
                     >
-                      機能ブロック (ダイアログ)
+                      機能ブロック
                     </button>
                     <button
                       type="button"
                       onClick={() => handleAddActionBlock(script.id, 'variable')}
-                      className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-bold border border-purple-200"
+                      className="px-2.5 py-1 bg-pink-50 hover:bg-pink-100 text-pink-800 rounded-lg text-xs font-bold border border-pink-200"
                     >
                       変数ブロック
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAddActionBlock(script.id, 'check')}
+                      className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-800 rounded-lg text-xs font-bold border border-purple-200 flex items-center gap-1"
+                    >
+                      <Search className="w-3 h-3" />
+                      <span>検査ブロック</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAddActionBlock(script.id, 'loop')}
+                      className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg text-xs font-bold border border-amber-200 flex items-center gap-1"
+                    >
+                      <Repeat className="w-3 h-3" />
+                      <span>繰り返しブロック</span>
                     </button>
                   </div>
                 </div>
@@ -1276,9 +1595,9 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
       {isPublishModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in">
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 sm:p-8 border border-neutral-200 text-neutral-900">
-            <h3 className="text-xl font-black text-neutral-900 mb-1">プログラムを投稿</h3>
+            <h3 className="text-xl font-black text-neutral-900 mb-1">プログラムをオンライン投稿</h3>
             <p className="text-xs text-neutral-500 mb-4">
-              名前を決めて投稿しましょう（1ユーザー3作品まで）
+              名前を決めて投稿しましょう（リアルタイムで全ユーザーの「ツールを見る」に掲載されます）
             </p>
 
             <div className="space-y-4">
@@ -1351,7 +1670,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                   disabled={title.trim().length < 2 || title.trim().length > 20}
                   className="w-2/3 py-2.5 px-4 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98"
                 >
-                  投稿する
+                  オンライン投稿する
                 </button>
               </div>
             </div>

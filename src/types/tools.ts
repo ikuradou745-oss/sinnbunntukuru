@@ -23,11 +23,11 @@ export interface SpriteItem {
   id: string;
   name: string;
   dataUrl: string; // 16x16 PNG data url
-  initialX: number; // 0 ~ 112 (grid or pixels within 128)
+  initialX: number; // 0 ~ 112
   initialY: number; // 0 ~ 112
 }
 
-export type BlockCategory = 'event' | 'action' | 'feature' | 'variable';
+export type BlockCategory = 'event' | 'action' | 'feature' | 'variable' | 'check' | 'loop';
 
 export type EventType =
   | 'start' // ゲームがスタートされた
@@ -40,17 +40,18 @@ export type EventType =
 export interface ProgramBlock {
   id: string;
   category: BlockCategory;
-  // Event
+
+  // Event (実行)
   eventType?: EventType;
   keyNum?: number; // 1 ~ 9
   
-  // Action (動かす / 座標設定)
+  // Action (動作: 動かす / 座標設定)
   actionType?: 'move_step' | 'set_pos';
   spriteId?: string;
   direction?: 'up' | 'down' | 'left' | 'right';
-  steps?: number | string; // number or variable name
-  posX?: number | string;
-  posY?: number | string;
+  steps?: number | string; // literal number OR variable name (e.g. "スコア1")
+  posX?: number | string;  // literal number OR variable name
+  posY?: number | string;  // literal number OR variable name
 
   // Feature (機能: ダイアログ表示 / 閉じる)
   featureText?: string; // 20文字まで
@@ -59,7 +60,18 @@ export interface ProgramBlock {
   // Variable (変数操作)
   varName?: string;
   varOp?: 'set' | 'add' | 'sub';
-  varValue?: number | string;
+  varValue?: number | string; // literal number OR variable name
+
+  // Check / Condition (検査: 〇〇が〇〇に触れていたら)
+  checkSpriteA?: string;
+  checkSpriteB?: string;
+
+  // Loop (繰り返し: 〇〇回またはずっと)
+  repeatType?: 'count' | 'forever';
+  repeatCount?: number | string; // literal number OR variable name
+
+  // Nested blocks inside Check or Loop
+  childBlocks?: ProgramBlock[];
 }
 
 export interface ProgramEventScript {
@@ -80,6 +92,6 @@ export interface ProgramToolItem {
   backgroundDataUrl: string; // 128x128
   sprites: SpriteItem[]; // Max 7
   activeNumberKeys: number[]; // e.g. [1, 2, 3] from 1..9
-  variables: Record<string, number>; // initial variables
+  variables: Record<string, number>; // initial variables (including スコア1〜10)
   scripts: ProgramEventScript[]; // Event + Stacked blocks (max 1000 blocks)
 }

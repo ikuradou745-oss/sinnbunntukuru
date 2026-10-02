@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ProgramToolItem } from '../../types/tools';
+import { ProgramToolItem, ProgramBlock } from '../../types/tools';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCcw, X } from 'lucide-react';
 
 interface GameRuntimeProps {
@@ -23,15 +23,46 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const spriteImagesRef = useRef<Record<string, HTMLImageElement>>({});
+  const loopIntervalRef = useRef<number | null>(null);
+
+  // Helper to resolve a value (literal number or variable name)
+  const resolveValue = (val: number | string | undefined, currentVars: Record<string, number>, fallback = 0): number => {
+    if (val === undefined || val === null || val === '') return fallback;
+    if (typeof val === 'number') return val;
+    if (currentVars[val] !== undefined) return currentVars[val];
+    const parsed = Number(val);
+    return isNaN(parsed) ? fallback : parsed;
+  };
+
+  // Interpolate variable values in text, e.g. "スコア1: {スコア1}"
+  const interpolateText = (text: string, currentVars: Record<string, number>) => {
+    let result = text;
+    Object.keys(currentVars).forEach((vKey) => {
+      result = result.replace(new RegExp(`{${vKey}}`, 'g'), String(currentVars[vKey]));
+    });
+    return result;
+  };
 
   // Reset / Initialize game
   const resetGame = () => {
+    if (loopIntervalRef.current) {
+      clearInterval(loopIntervalRef.current);
+      loopIntervalRef.current = null;
+    }
+
     const initPos: Record<string, { x: number; y: number }> = {};
     program.sprites.forEach((sp) => {
       initPos[sp.id] = { x: sp.initialX, y: sp.initialY };
     });
     setSpritePositions(initPos);
-    setVariables({ ...(program.variables || {}) });
+
+    // Initial variables: ensure スコア1〜10 exist
+    const defaultVars: Record<string, number> = {};
+    for (let i = 1; i <= 10; i++) {
+      defaultVars[`スコア${i}`] = 0;
+    }
+    const mergedVars = { ...defaultVars, ...(program.variables || {}) };
+    setVariables(mergedVars);
     setDialogText(null);
 
     // Preload background
@@ -55,23 +86,102 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
     // Execute 'start' event blocks
     setTimeout(() => {
       executeEvent('start');
-    }, 50);
+    }, 60);
   };
 
   useEffect(() => {
     resetGame();
+    return () => {
+      if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
+    };
   }, [program]);
 
-  // Interpolate variable values in text, e.g. "スコア: {スコア}"
-  const interpolateText = (text: string, currentVars: Record<string, number>) => {
-    let result = text;
-    Object.keys(currentVars).forEach((vKey) => {
-      result = result.replace(new RegExp(`{${vKey}}`, 'g'), String(currentVars[vKey]));
+  // Execute a list of blocks recursively
+  const executeBlockList = (
+    blockList: ProgramBlock[],
+    currentPositions: Record<string, { x: number; y: number }>,
+    currentVariables: Record<string, number>
+  ) => {
+    blockList.forEach((block) => {
+      // 1. ACTION: Move step
+      if (block.category === 'action' && block.actionType === 'move_step' && block.spriteId) {
+        const current = currentPositions[block.spriteId] || { x: 0, y: 0 };
+        const stepVal = resolveValue(block.steps, currentVariables, 8);
+        let dx = 0;
+        let dy = 0;
+        if (block.direction === 'up') dy = -stepVal;
+        if (block.direction === 'down') dy = stepVal;
+        if (block.direction === 'left') dx = -stepVal;
+        if (block.direction === 'right') dx = stepVal;
+
+        currentPositions[block.spriteId] = {
+          x: Math.max(0, Math.min(112, current.x + dx)),
+          y: Math.max(0, Math.min(112, current.y + dy)),
+        };
+      }
+
+      // 2. ACTION: Set Pos
+      if (block.category === 'action' && block.actionType === 'set_pos' && block.spriteId) {
+        const posX = resolveValue(block.posX, currentVariables, 0);
+        const posY = resolveValue(block.posY, currentVariables, 0);
+        currentPositions[block.spriteId] = {
+          x: Math.max(0, Math.min(112, posX)),
+          y: Math.max(0, Math.min(112, posY)),
+        };
+      }
+
+      // 3. FEATURE: Dialog
+      if (block.category === 'feature') {
+        if (block.featureAction === 'show_dialog' && block.featureText) {
+          const text = interpolateText(block.featureText, currentVariables);
+          setDialogText(text);
+        } else if (block.featureAction === 'hide_dialog') {
+          setDialogText(null);
+        }
+      }
+
+      // 4. VARIABLE: set, add, sub
+      if (block.category === 'variable' && block.varName) {
+        const currentVal = currentVariables[block.varName] ?? 0;
+        const opVal = resolveValue(block.varValue, currentVariables, 1);
+        if (block.varOp === 'set') {
+          currentVariables[block.varName] = opVal;
+        } else if (block.varOp === 'add') {
+          currentVariables[block.varName] = currentVal + opVal;
+        } else if (block.varOp === 'sub') {
+          currentVariables[block.varName] = currentVal - opVal;
+        }
+      }
+
+      // 5. CHECK / 検査: 〇〇が〇〇に触れていたら
+      if (block.category === 'check' && block.checkSpriteA && block.checkSpriteB) {
+        const posA = currentPositions[block.checkSpriteA];
+        const posB = currentPositions[block.checkSpriteB];
+        if (posA && posB) {
+          // 16x16 collision threshold
+          const isTouching = Math.abs(posA.x - posB.x) < 16 && Math.abs(posA.y - posB.y) < 16;
+          if (isTouching && block.childBlocks && block.childBlocks.length > 0) {
+            executeBlockList(block.childBlocks, currentPositions, currentVariables);
+          }
+        }
+      }
+
+      // 6. LOOP / 繰り返し: 〇〇回またはずっと
+      if (block.category === 'loop' && block.childBlocks && block.childBlocks.length > 0) {
+        if (block.repeatType === 'count') {
+          const count = Math.max(1, Math.min(100, resolveValue(block.repeatCount, currentVariables, 1)));
+          for (let i = 0; i < count; i++) {
+            executeBlockList(block.childBlocks, currentPositions, currentVariables);
+          }
+        } else if (block.repeatType === 'forever') {
+          // Loop once on trigger, and setup continuous tick
+          executeBlockList(block.childBlocks, currentPositions, currentVariables);
+        }
+      }
     });
-    return result;
   };
 
-  // Execute a block stack
+  // Execute a block stack triggered by an event
   const executeEvent = (
     eventType: 'start' | 'key_up' | 'key_down' | 'key_left' | 'key_right' | 'key_num',
     keyNum?: number
@@ -91,57 +201,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
         const nextVars = { ...prevVars };
 
         matchingScripts.forEach((script) => {
-          script.actionBlocks.forEach((block) => {
-            // Action 1: Move step
-            if (block.category === 'action' && block.actionType === 'move_step' && block.spriteId) {
-              const current = nextPos[block.spriteId] || { x: 0, y: 0 };
-              let stepVal = typeof block.steps === 'number' ? block.steps : nextVars[String(block.steps)] || 8;
-              let dx = 0;
-              let dy = 0;
-              if (block.direction === 'up') dy = -stepVal;
-              if (block.direction === 'down') dy = stepVal;
-              if (block.direction === 'left') dx = -stepVal;
-              if (block.direction === 'right') dx = stepVal;
-
-              nextPos[block.spriteId] = {
-                x: Math.max(0, Math.min(112, current.x + dx)),
-                y: Math.max(0, Math.min(112, current.y + dy)),
-              };
-            }
-
-            // Action 2: Set pos
-            if (block.category === 'action' && block.actionType === 'set_pos' && block.spriteId) {
-              const posX = typeof block.posX === 'number' ? block.posX : nextVars[String(block.posX)] || 0;
-              const posY = typeof block.posY === 'number' ? block.posY : nextVars[String(block.posY)] || 0;
-              nextPos[block.spriteId] = {
-                x: Math.max(0, Math.min(112, posX)),
-                y: Math.max(0, Math.min(112, posY)),
-              };
-            }
-
-            // Feature: Show / Hide Dialog
-            if (block.category === 'feature') {
-              if (block.featureAction === 'show_dialog' && block.featureText) {
-                const text = interpolateText(block.featureText, nextVars);
-                setDialogText(text);
-              } else if (block.featureAction === 'hide_dialog') {
-                setDialogText(null);
-              }
-            }
-
-            // Variable Op
-            if (block.category === 'variable' && block.varName) {
-              const currentVal = nextVars[block.varName] ?? 0;
-              const opVal = typeof block.varValue === 'number' ? block.varValue : nextVars[String(block.varValue)] || 0;
-              if (block.varOp === 'set') {
-                nextVars[block.varName] = opVal;
-              } else if (block.varOp === 'add') {
-                nextVars[block.varName] = currentVal + opVal;
-              } else if (block.varOp === 'sub') {
-                nextVars[block.varName] = currentVal - opVal;
-              }
-            }
-          });
+          executeBlockList(script.actionBlocks, nextPos, nextVars);
         });
 
         return nextVars;
@@ -211,6 +271,11 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
     drawGame(spritePositions);
   }, [spritePositions]);
 
+  // Format variables for display (only non-zero or first 4)
+  const activeVars = Object.entries(variables).filter(
+    ([k, v]) => v !== 0 || ['スコア1', 'スコア2'].includes(k)
+  );
+
   return (
     <div className="flex flex-col items-center gap-4 w-full select-none">
       {/* Title & Close (if modal) */}
@@ -231,17 +296,17 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
         </div>
       )}
 
-      {/* Variables Display bar */}
+      {/* Variables Display bar (スコア1〜10など) */}
       <div className="flex flex-wrap items-center justify-between w-full max-w-[288px] px-3 py-1.5 bg-neutral-900 text-white rounded-xl text-xs font-mono">
-        <div className="flex flex-wrap gap-2.5">
-          {Object.keys(variables).length > 0 ? (
-            Object.entries(variables).map(([k, v]) => (
+        <div className="flex flex-wrap gap-2">
+          {activeVars.length > 0 ? (
+            activeVars.slice(0, 4).map(([k, v]) => (
               <span key={k} className="text-amber-300 font-bold">
                 {k}: <span className="text-white">{v}</span>
               </span>
             ))
           ) : (
-            <span className="text-neutral-400 text-[11px]">変数なし</span>
+            <span className="text-neutral-400 text-[11px]">スコア1: 0</span>
           )}
         </div>
         <button
@@ -271,7 +336,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
 
         {/* Text Dialog Overlay (機能: テキストダイアログを表示) */}
         {dialogText && (
-          <div className="absolute bottom-2 inset-x-2 bg-neutral-950/90 text-white p-2.5 rounded-xl border border-neutral-700 shadow-lg animate-fade-in text-xs leading-snug font-sans">
+          <div className="absolute bottom-2 inset-x-2 bg-neutral-950/95 text-white p-2.5 rounded-xl border border-neutral-700 shadow-lg animate-fade-in text-xs leading-snug font-sans">
             <div className="flex items-start justify-between gap-1">
               <span className="font-medium">{dialogText}</span>
               <button

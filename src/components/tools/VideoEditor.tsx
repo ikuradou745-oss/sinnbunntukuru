@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { UserProfile } from '../../types/user';
 import { VideoToolItem } from '../../types/tools';
-import { saveVideo } from '../../services/toolStorage';
+import { saveOnlineVideo } from '../../services/toolStorage';
 import {
   Film,
   Play,
@@ -10,15 +10,16 @@ import {
   ClipboardPaste,
   ChevronLeft,
   ChevronRight,
-  RotateCcw,
   Trash2,
   CheckCircle,
-  Eye,
   Eraser,
   Paintbrush,
   PaintBucket,
   ArrowLeft,
   Layers,
+  ZoomIn,
+  ZoomOut,
+  Grid,
 } from 'lucide-react';
 
 interface VideoEditorProps {
@@ -44,6 +45,10 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
   const [frames, setFrames] = useState<string[]>([]);
   const [clipboardFrame, setClipboardFrame] = useState<string | null>(null);
 
+  // Zoom scale: 1x (100%), 2x (200%), 3x (300%), 4x (400%)
+  const [zoomLevel, setZoomLevel] = useState<number>(2);
+  const [showPixelGrid, setShowPixelGrid] = useState<boolean>(false);
+
   // Drawing state
   const [tool, setTool] = useState<'pen' | 'eraser' | 'bucket'>('pen');
   const [color, setColor] = useState<string>('#000000');
@@ -60,6 +65,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
   const [publishError, setPublishError] = useState<string>('');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const filmstripScrollRef = useRef<HTMLDivElement | null>(null);
   const isDrawing = useRef<boolean>(false);
   const lastPos = useRef<{ x: number; y: number } | null>(null);
 
@@ -85,6 +91,18 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
   useEffect(() => {
     if (frames[currentFrameIndex]) {
       loadFrameToCanvas(frames[currentFrameIndex]);
+    }
+
+    // Scroll active thumbnail into view in the horizontal sliding filmstrip
+    if (filmstripScrollRef.current) {
+      const activeThumb = filmstripScrollRef.current.children[currentFrameIndex] as HTMLElement;
+      if (activeThumb) {
+        activeThumb.scrollIntoView({
+          behavior: 'smooth',
+          block: 'nearest',
+          inline: 'center',
+        });
+      }
     }
   }, [currentFrameIndex]);
 
@@ -356,8 +374,19 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
     setIsPlaying(!isPlaying);
   };
 
+  // Slide filmstrip left/right
+  const handleSlideFilmstrip = (direction: 'left' | 'right') => {
+    if (filmstripScrollRef.current) {
+      const scrollAmount = 300;
+      filmstripScrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth',
+      });
+    }
+  };
+
   // Complete / Publish
-  const handlePublish = () => {
+  const handlePublish = async () => {
     const trimmed = title.trim();
     if (trimmed.length < 2 || trimmed.length > 20) {
       setPublishError('名前は2〜20文字で入力してください。');
@@ -383,7 +412,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
       frames: frames.slice(0, totalFrames),
     };
 
-    const res = saveVideo(videoItem);
+    const res = await saveOnlineVideo(videoItem);
     if (!res.success) {
       setPublishError(res.message || '保存に失敗しました。');
       return;
@@ -395,6 +424,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
 
   // Get previous frame for onion skin
   const prevFrameUrl = currentFrameIndex > 0 ? frames[currentFrameIndex - 1] : null;
+
+  // Zoom pixel size mapping
+  const canvasDisplayWidth = 128 * zoomLevel * 2.5; // e.g. 2x = 640px, 4x = 1280px
 
   return (
     <div className="w-full max-w-5xl mx-auto p-3 sm:p-6 flex flex-col gap-5">
@@ -414,8 +446,13 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
             <Film className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-black text-neutral-900 leading-tight">動画クリエイター</h2>
-            <p className="text-[11px] text-neutral-500">128×64 px | 0.1秒コマ送り (10 FPS)</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-black text-neutral-900 leading-tight">動画クリエイター</h2>
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                ● リアルタイムオンライン対応
+              </span>
+            </div>
+            <p className="text-[11px] text-neutral-500">128×64 px | 拡大描画＆横スライドコマ選択対応</p>
           </div>
         </div>
 
@@ -429,32 +466,67 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
           className="flex items-center gap-1.5 px-5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg transition-all active:scale-95"
         >
           <CheckCircle className="w-4 h-4 text-emerald-400" />
-          <span>完成（投稿する）</span>
+          <span>完成（オンライン投稿）</span>
         </button>
       </div>
 
-      {/* Main Workspace (Half-screen / Centered 128x64 display) */}
+      {/* Main Workspace (128x64 display with Zoom controls) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         {/* Left Side: Canvas + Playback */}
         <div className="lg:col-span-8 flex flex-col items-center gap-4 bg-neutral-50 p-4 sm:p-6 rounded-3xl border border-neutral-200 shadow-xs">
           
-          {/* Header over canvas */}
-          <div className="w-full flex items-center justify-between text-xs text-neutral-600 px-1">
+          {/* Header over canvas: Frame number & Zoom & Onion skin controls */}
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 text-xs text-neutral-600 px-1">
             <div className="font-bold flex items-center gap-2">
-              <span className="bg-neutral-900 text-white px-2 py-0.5 rounded text-[11px] font-mono">
+              <span className="bg-neutral-900 text-white px-2.5 py-0.5 rounded-md text-xs font-mono">
                 コマ {currentFrameIndex + 1} / {totalFrames}
               </span>
-              <span className="text-[11px] text-neutral-500 font-mono">
+              <span className="text-xs text-neutral-500 font-mono">
                 {((currentFrameIndex + 1) * 0.1).toFixed(1)}s / {(totalFrames * 0.1).toFixed(1)}s
               </span>
+            </div>
+
+            {/* Zoom Controls (拡大描画) */}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-neutral-300">
+              <span className="text-[11px] font-bold text-neutral-500 px-1.5">拡大率:</span>
+              {[1, 2, 3, 4].map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => setZoomLevel(z)}
+                  className={`px-2 py-0.5 rounded-md text-xs font-bold transition-all ${
+                    zoomLevel === z
+                      ? 'bg-neutral-900 text-white shadow-xs'
+                      : 'text-neutral-700 hover:bg-neutral-100'
+                  }`}
+                >
+                  {z}x
+                </button>
+              ))}
+
+              <div className="h-3.5 w-px bg-neutral-200 mx-0.5" />
+
+              {/* Pixel Grid Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowPixelGrid(!showPixelGrid)}
+                className={`p-1 rounded-md text-xs transition-colors ${
+                  showPixelGrid
+                    ? 'bg-neutral-900 text-white'
+                    : 'text-neutral-600 hover:bg-neutral-100'
+                }`}
+                title="ピクセルグリッド表示切替"
+              >
+                <Grid className="w-3.5 h-3.5" />
+              </button>
             </div>
 
             {/* Onion skin toggle */}
             <button
               type="button"
               onClick={() => setShowOnionSkin(!showOnionSkin)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
                 showOnionSkin
                   ? 'bg-amber-100 border-amber-300 text-amber-900 font-bold'
                   : 'bg-white border-neutral-300 text-neutral-500 hover:bg-neutral-100'
@@ -462,46 +534,57 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
               title="前のコマを薄く表示する（作画補助）"
             >
               <Layers className="w-3.5 h-3.5" />
-              <span>オニオンスキン {showOnionSkin ? 'ON' : 'OFF'}</span>
+              <span>下絵 {showOnionSkin ? 'ON' : 'OFF'}</span>
             </button>
           </div>
 
-          {/* 128x64 Canvas Container (Relative with Onion skin underneath) */}
-          <div className="relative border-4 border-neutral-800 rounded-xl bg-white shadow-md overflow-hidden select-none">
-            {/* Onion skin background image */}
-            {showOnionSkin && prevFrameUrl && !isPlaying && (
-              <img
-                src={prevFrameUrl}
-                alt="前コマ下絵"
-                className="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-25 filter contrast-125"
-                style={{ imageRendering: 'pixelated' }}
-              />
-            )}
-
-            {/* Drawing Canvas */}
-            <canvas
-              ref={canvasRef}
-              width={128}
-              height={64}
-              onMouseDown={handlePointerDown}
-              onMouseMove={handlePointerMove}
-              onMouseUp={handlePointerUp}
-              onMouseLeave={handlePointerUp}
-              onTouchStart={handlePointerDown}
-              onTouchMove={handlePointerMove}
-              onTouchEnd={handlePointerUp}
-              className={`touch-none relative z-10 ${isPlaying ? 'cursor-default' : 'cursor-crosshair'}`}
+          {/* 128x64 Zoomable Canvas Container with Scroll */}
+          <div className="w-full max-h-[460px] overflow-auto border-4 border-neutral-800 rounded-2xl bg-neutral-200/80 p-4 shadow-inner flex items-center justify-center">
+            <div
+              className={`relative border-2 border-neutral-400 bg-white shadow-lg overflow-hidden select-none shrink-0 ${
+                showPixelGrid
+                  ? 'bg-[radial-gradient(#cbd5e1_1px,transparent_1px)] [background-size:8px_8px]'
+                  : ''
+              }`}
               style={{
-                width: '100%',
-                maxWidth: '512px',
+                width: `${Math.min(canvasDisplayWidth, 768)}px`,
                 aspectRatio: '128 / 64',
-                imageRendering: 'pixelated',
               }}
-            />
+            >
+              {/* Onion skin background image */}
+              {showOnionSkin && prevFrameUrl && !isPlaying && (
+                <img
+                  src={prevFrameUrl}
+                  alt="前コマ下絵"
+                  className="absolute inset-0 w-full h-full object-contain pointer-events-none opacity-30 filter contrast-125"
+                  style={{ imageRendering: 'pixelated' }}
+                />
+              )}
+
+              {/* Drawing Canvas */}
+              <canvas
+                ref={canvasRef}
+                width={128}
+                height={64}
+                onMouseDown={handlePointerDown}
+                onMouseMove={handlePointerMove}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
+                onTouchStart={handlePointerDown}
+                onTouchMove={handlePointerMove}
+                onTouchEnd={handlePointerUp}
+                className={`touch-none relative z-10 w-full h-full ${
+                  isPlaying ? 'cursor-default' : 'cursor-crosshair'
+                }`}
+                style={{
+                  imageRendering: 'pixelated',
+                }}
+              />
+            </div>
           </div>
 
           {/* Canvas Bottom Action Controls */}
-          <div className="w-full max-w-[512px] flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+          <div className="w-full flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
             {/* Play/Pause */}
             <button
               type="button"
@@ -555,18 +638,18 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                 type="button"
                 disabled={currentFrameIndex === 0 || isPlaying}
                 onClick={handleCopyPrevious}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 disabled:opacity-40 text-[11px] font-semibold text-neutral-700"
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 disabled:opacity-40 text-xs font-semibold text-neutral-700"
                 title="直前のコマを現在のコマにコピーする"
               >
                 <Copy className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">前画面コピー</span>
+                <span>前画面コピー</span>
               </button>
 
               <button
                 type="button"
                 disabled={isPlaying}
                 onClick={handleCopyCurrent}
-                className="p-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-[11px] text-neutral-700"
+                className="p-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-xs text-neutral-700"
                 title="現在の画面をクリップボードにコピー"
               >
                 <Copy className="w-3.5 h-3.5" />
@@ -576,7 +659,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                 type="button"
                 disabled={!clipboardFrame || isPlaying}
                 onClick={handlePaste}
-                className="p-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-[11px] text-neutral-700 disabled:opacity-30"
+                className="p-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-100 text-xs text-neutral-700 disabled:opacity-30"
                 title="コピーした画面を貼り付け"
               >
                 <ClipboardPaste className="w-3.5 h-3.5" />
@@ -586,7 +669,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                 type="button"
                 disabled={isPlaying}
                 onClick={handleClearFrame}
-                className="p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-[11px] text-red-600"
+                className="p-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50 text-xs text-red-600"
                 title="このコマを全消去"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -594,30 +677,39 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
             </div>
           </div>
 
-          {/* Timeline Scrubber */}
-          <div className="w-full max-w-[512px] bg-white p-3 rounded-2xl border border-neutral-200">
+          {/* HORIZONTAL SLIDING FILMSTRIP (横にスライドできるコマ選択) */}
+          <div className="w-full bg-white p-3 rounded-2xl border border-neutral-200 shadow-2xs">
             <div className="flex items-center justify-between text-xs text-neutral-500 mb-2">
-              <span className="font-semibold text-neutral-700">タイムライン (コマ選択)</span>
-              <span className="font-mono text-[11px]">
-                全コマ時間: {(totalFrames * 0.1).toFixed(1)} 秒
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-neutral-800">横スライド式コマ選択</span>
+                <span className="text-[11px] text-neutral-400">（スライドやクリックで直接移動）</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleSlideFilmstrip('left')}
+                  className="p-1 rounded-md border border-neutral-300 bg-neutral-50 hover:bg-neutral-200 text-neutral-700"
+                  title="左にスライド"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSlideFilmstrip('right')}
+                  className="p-1 rounded-md border border-neutral-300 bg-neutral-50 hover:bg-neutral-200 text-neutral-700"
+                  title="右にスライド"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
-            
-            <input
-              type="range"
-              min={0}
-              max={totalFrames - 1}
-              value={currentFrameIndex}
-              disabled={isPlaying}
-              onChange={(e) => {
-                saveCurrentCanvasToFrames();
-                setCurrentFrameIndex(Number(e.target.value));
-              }}
-              className="w-full accent-neutral-900 cursor-pointer"
-            />
 
-            {/* Thumbnail mini strip */}
-            <div className="flex gap-1 overflow-x-auto py-1 mt-1 scrollbar-none">
+            {/* Horizontal Scroll Strip */}
+            <div
+              ref={filmstripScrollRef}
+              className="flex gap-2 overflow-x-auto py-2 px-1 scroll-smooth select-none"
+              style={{ scrollbarWidth: 'thin' }}
+            >
               {frames.slice(0, totalFrames).map((fUrl, idx) => (
                 <button
                   key={idx}
@@ -628,18 +720,25 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                       setCurrentFrameIndex(idx);
                     }
                   }}
-                  className={`w-9 h-5 rounded shrink-0 border overflow-hidden transition-all ${
+                  className={`flex flex-col items-center gap-1 p-1 rounded-xl shrink-0 border transition-all cursor-pointer ${
                     idx === currentFrameIndex
-                      ? 'border-neutral-900 ring-2 ring-neutral-900 scale-105'
-                      : 'border-neutral-200 opacity-60 hover:opacity-100'
+                      ? 'border-neutral-900 bg-neutral-900 text-white ring-2 ring-neutral-900 scale-105 shadow-md'
+                      : 'border-neutral-200 bg-neutral-50 hover:bg-neutral-100 text-neutral-600'
                   }`}
+                  style={{ width: '88px' }}
                 >
-                  <img
-                    src={fUrl}
-                    alt={`コマ ${idx + 1}`}
-                    className="w-full h-full object-cover"
-                    style={{ imageRendering: 'pixelated' }}
-                  />
+                  <div className="w-full bg-white rounded-lg overflow-hidden border border-neutral-300 aspect-[128/64]">
+                    <img
+                      src={fUrl}
+                      alt={`コマ ${idx + 1}`}
+                      className="w-full h-full object-contain"
+                      style={{ imageRendering: 'pixelated' }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between w-full px-1 text-[10px] font-mono font-bold">
+                    <span>#{idx + 1}</span>
+                    <span>{(idx * 0.1).toFixed(1)}s</span>
+                  </div>
                 </button>
               ))}
             </div>
@@ -658,7 +757,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
               </span>
             </h3>
             <p className="text-[11px] text-neutral-400 mb-3">
-              1コマ0.1秒。最大150コマ（15.0秒）まで作成可能です。
+              1コマ0.1秒。最大150コマ（15.0秒）まで設定可能です。
             </p>
 
             <div className="flex items-center gap-3">
@@ -730,7 +829,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
 
             {/* Brush sizes */}
             <div className="flex items-center justify-between text-xs text-neutral-600 pt-1">
-              <span className="text-[11px] font-medium text-neutral-500">太さ:</span>
+              <span className="text-[11px] font-medium text-neutral-500">ペンの太さ:</span>
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 4].map((sz) => (
                   <button
@@ -796,9 +895,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
       {isPublishModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-fade-in">
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 sm:p-8 border border-neutral-200 text-neutral-900">
-            <h3 className="text-xl font-black text-neutral-900 mb-1">動画を完成・投稿</h3>
+            <h3 className="text-xl font-black text-neutral-900 mb-1">動画をオンライン投稿</h3>
             <p className="text-xs text-neutral-500 mb-4">
-              動画の名前を決めて投稿しましょう（ツールを見るで他の人も閲覧できます）
+              名前を決めて投稿しましょう（リアルタイムで全ユーザーの「ツールを見る」に掲載されます）
             </p>
 
             <div className="space-y-4">
@@ -867,7 +966,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
                   disabled={title.trim().length < 2 || title.trim().length > 20}
                   className="w-2/3 py-2.5 px-4 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-98"
                 >
-                  投稿する
+                  オンライン投稿する
                 </button>
               </div>
             </div>

@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { UserProfile } from '../../types/user';
 import { VideoToolItem, ProgramToolItem } from '../../types/tools';
 import {
-  getStoredVideos,
-  getStoredPrograms,
-  deleteVideo,
-  deleteProgram,
-  incrementVideoViews,
-  incrementProgramViews,
+  fetchOnlineVideos,
+  fetchOnlinePrograms,
+  deleteOnlineVideo,
+  deleteOnlineProgram,
+  incrementOnlineVideoViews,
+  incrementOnlineProgramViews,
 } from '../../services/toolStorage';
 import { VideoPlayerModal } from './VideoPlayerModal';
 import { GameRuntime } from './GameRuntime';
@@ -21,10 +21,9 @@ import {
   Trash2,
   ArrowLeft,
   Sparkles,
-  Calendar,
   Gamepad2,
   User,
-  X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface ToolViewerProps {
@@ -44,6 +43,7 @@ export const ToolViewer: React.FC<ToolViewerProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [searchType, setSearchType] = useState<'title' | 'author'>('title');
   const [sortBy, setSortBy] = useState<'popular' | 'latest'>('popular');
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const [videos, setVideos] = useState<VideoToolItem[]>([]);
   const [programs, setPrograms] = useState<ProgramToolItem[]>([]);
@@ -52,37 +52,56 @@ export const ToolViewer: React.FC<ToolViewerProps> = ({
   const [selectedVideo, setSelectedVideo] = useState<VideoToolItem | null>(null);
   const [selectedProgram, setSelectedProgram] = useState<ProgramToolItem | null>(null);
 
-  const loadData = () => {
-    setVideos(getStoredVideos());
-    setPrograms(getStoredPrograms());
+  const loadData = async () => {
+    setIsRefreshing(true);
+    try {
+      const [vList, pList] = await Promise.all([
+        fetchOnlineVideos(),
+        fetchOnlinePrograms(),
+      ]);
+      setVideos(vList);
+      setPrograms(pList);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
     loadData();
+    // Real-time polling every 4 seconds to sync online submissions
+    const interval = setInterval(() => {
+      fetchOnlineVideos().then(setVideos).catch(() => {});
+      fetchOnlinePrograms().then(setPrograms).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleOpenVideo = (video: VideoToolItem) => {
-    incrementVideoViews(video.id);
+    incrementOnlineVideoViews(video.id);
     setSelectedVideo({ ...video, views: video.views + 1 });
-    loadData();
+    setVideos((prev) =>
+      prev.map((v) => (v.id === video.id ? { ...v, views: v.views + 1 } : v))
+    );
   };
 
   const handleOpenProgram = (program: ProgramToolItem) => {
-    incrementProgramViews(program.id);
+    incrementOnlineProgramViews(program.id);
     setSelectedProgram({ ...program, views: program.views + 1 });
-    loadData();
+    setPrograms((prev) =>
+      prev.map((p) => (p.id === program.id ? { ...p, views: p.views + 1 } : p))
+    );
   };
 
-  const handleDeleteVideo = (id: string) => {
-    const success = deleteVideo(id, user.name);
+  const handleDeleteVideo = async (id: string) => {
+    const success = await deleteOnlineVideo(id, user.name);
     if (success) {
       if (selectedVideo?.id === id) setSelectedVideo(null);
       loadData();
     }
   };
 
-  const handleDeleteProgram = (id: string) => {
-    const success = deleteProgram(id, user.name);
+  const handleDeleteProgram = async (id: string) => {
+    const success = await deleteOnlineProgram(id, user.name);
     if (success) {
       if (selectedProgram?.id === id) setSelectedProgram(null);
       loadData();
@@ -139,18 +158,35 @@ export const ToolViewer: React.FC<ToolViewerProps> = ({
             <Sparkles className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h2 className="text-lg font-black text-neutral-900 leading-tight">ツールを見る</h2>
-            <p className="text-[11px] text-neutral-500">みんなが投稿した動画・プログラムを体験できます</p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-black text-neutral-900 leading-tight">ツールを見る</h2>
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full border border-emerald-300">
+                ● リアルタイムオンライン
+              </span>
+            </div>
+            <p className="text-[11px] text-neutral-500">
+              みんなが投稿した動画・プログラムをリアルタイムで閲覧＆プレイできます
+            </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenCreateModal}
-          className="flex items-center gap-1.5 px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
-        >
-          <span>作品をつくる</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={loadData}
+            className="p-2 text-neutral-600 hover:text-neutral-900 bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs transition-colors"
+            title="最新データに更新"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+          </button>
+          <button
+            type="button"
+            onClick={onOpenCreateModal}
+            className="flex items-center gap-1.5 px-4 py-2 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
+          >
+            <span>作品をつくる</span>
+          </button>
+        </div>
       </div>
 
       {/* Category Tabs: 動画 vs プログラム */}
