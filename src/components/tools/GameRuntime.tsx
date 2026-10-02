@@ -9,7 +9,6 @@ import {
   X,
   Trophy,
   Skull,
-  Play,
   Award,
 } from 'lucide-react';
 
@@ -18,6 +17,8 @@ interface GameRuntimeProps {
   onClose?: () => void;
   isStandaloneModal?: boolean;
 }
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const GameRuntime: React.FC<GameRuntimeProps> = ({
   program,
@@ -38,10 +39,19 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const spriteImagesRef = useRef<Record<string, HTMLImageElement>>({});
-  const loopIntervalRef = useRef<number | null>(null);
+
+  // Refs for async execution safety & fresh values
+  const positionsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const variablesRef = useRef<Record<string, number>>({});
+  const gameStateRef = useRef<'playing' | 'clear' | 'gameover'>('playing');
+  const gameSessionIdRef = useRef<number>(0);
 
   // Helper to resolve a value (literal number or variable name)
-  const resolveValue = (val: number | string | undefined, currentVars: Record<string, number>, fallback = 0): number => {
+  const resolveValue = (
+    val: number | string | undefined,
+    currentVars: Record<string, number>,
+    fallback = 0
+  ): number => {
     if (val === undefined || val === null || val === '') return fallback;
     if (typeof val === 'number') return val;
     if (currentVars[val] !== undefined) return currentVars[val];
@@ -56,189 +66,6 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
       result = result.replace(new RegExp(`{${vKey}}`, 'g'), String(currentVars[vKey]));
     });
     return result;
-  };
-
-  // Reset / Initialize game
-  const resetGame = () => {
-    if (loopIntervalRef.current) {
-      clearInterval(loopIntervalRef.current);
-      loopIntervalRef.current = null;
-    }
-
-    setGameState('playing');
-    setEndMessage(null);
-    setDialogText(null);
-
-    const initPos: Record<string, { x: number; y: number }> = {};
-    program.sprites.forEach((sp) => {
-      initPos[sp.id] = { x: sp.initialX, y: sp.initialY };
-    });
-    setSpritePositions(initPos);
-
-    // Initial variables: default to { 'スコア': 0 } if not defined
-    const defaultVars: Record<string, number> = { 'スコア': 0 };
-    const mergedVars = { ...defaultVars, ...(program.variables || {}) };
-    setVariables(mergedVars);
-
-    // Preload background
-    const bgImg = new Image();
-    bgImg.onload = () => {
-      bgImageRef.current = bgImg;
-      drawGame(initPos);
-    };
-    bgImg.src = program.backgroundDataUrl;
-
-    // Preload sprites
-    program.sprites.forEach((sp) => {
-      const spImg = new Image();
-      spImg.onload = () => {
-        spriteImagesRef.current[sp.id] = spImg;
-        drawGame(initPos);
-      };
-      spImg.src = sp.dataUrl;
-    });
-
-    // Execute 'start' event blocks
-    setTimeout(() => {
-      executeEvent('start');
-    }, 60);
-  };
-
-  useEffect(() => {
-    resetGame();
-    return () => {
-      if (loopIntervalRef.current) clearInterval(loopIntervalRef.current);
-    };
-  }, [program]);
-
-  // Execute a list of blocks recursively
-  const executeBlockList = (
-    blockList: ProgramBlock[],
-    currentPositions: Record<string, { x: number; y: number }>,
-    currentVariables: Record<string, number>
-  ) => {
-    blockList.forEach((block) => {
-      // 1. ACTION: Move step
-      if (block.category === 'action' && block.actionType === 'move_step' && block.spriteId) {
-        const current = currentPositions[block.spriteId] || { x: 0, y: 0 };
-        const stepVal = resolveValue(block.steps, currentVariables, 8);
-        let dx = 0;
-        let dy = 0;
-        if (block.direction === 'up') dy = -stepVal;
-        if (block.direction === 'down') dy = stepVal;
-        if (block.direction === 'left') dx = -stepVal;
-        if (block.direction === 'right') dx = stepVal;
-
-        currentPositions[block.spriteId] = {
-          x: Math.max(0, Math.min(112, current.x + dx)),
-          y: Math.max(0, Math.min(112, current.y + dy)),
-        };
-      }
-
-      // 2. ACTION: Set Pos
-      if (block.category === 'action' && block.actionType === 'set_pos' && block.spriteId) {
-        const posX = resolveValue(block.posX, currentVariables, 0);
-        const posY = resolveValue(block.posY, currentVariables, 0);
-        currentPositions[block.spriteId] = {
-          x: Math.max(0, Math.min(112, posX)),
-          y: Math.max(0, Math.min(112, posY)),
-        };
-      }
-
-      // 3. FEATURE: Dialog / Game Clear / Game Over
-      if (block.category === 'feature') {
-        if (block.featureAction === 'show_dialog' && block.featureText) {
-          const text = interpolateText(block.featureText, currentVariables);
-          setDialogText(text);
-        } else if (block.featureAction === 'hide_dialog') {
-          setDialogText(null);
-        } else if (block.featureAction === 'game_clear') {
-          setGameState('clear');
-          const msg = block.featureText
-            ? interpolateText(block.featureText, currentVariables)
-            : 'おめでとう！ゲームクリア！';
-          setEndMessage(msg);
-        } else if (block.featureAction === 'game_over') {
-          setGameState('gameover');
-          const msg = block.featureText
-            ? interpolateText(block.featureText, currentVariables)
-            : 'ゲームオーバー…！もう一度挑戦しよう';
-          setEndMessage(msg);
-        }
-      }
-
-      // 4. VARIABLE: set, add, sub
-      if (block.category === 'variable' && block.varName) {
-        const currentVal = currentVariables[block.varName] ?? 0;
-        const opVal = resolveValue(block.varValue, currentVariables, 1);
-        if (block.varOp === 'set') {
-          currentVariables[block.varName] = opVal;
-        } else if (block.varOp === 'add') {
-          currentVariables[block.varName] = currentVal + opVal;
-        } else if (block.varOp === 'sub') {
-          currentVariables[block.varName] = currentVal - opVal;
-        }
-      }
-
-      // 5. CHECK / 検査: 〇〇が〇〇に触れていたら
-      if (block.category === 'check' && block.checkSpriteA && block.checkSpriteB) {
-        const posA = currentPositions[block.checkSpriteA];
-        const posB = currentPositions[block.checkSpriteB];
-        if (posA && posB) {
-          // 16x16 collision threshold
-          const isTouching = Math.abs(posA.x - posB.x) < 16 && Math.abs(posA.y - posB.y) < 16;
-          if (isTouching && block.childBlocks && block.childBlocks.length > 0) {
-            executeBlockList(block.childBlocks, currentPositions, currentVariables);
-          }
-        }
-      }
-
-      // 6. LOOP / 繰り返し: 〇〇回またはずっと
-      if (block.category === 'loop' && block.childBlocks && block.childBlocks.length > 0) {
-        if (block.repeatType === 'count') {
-          const count = Math.max(1, Math.min(100, resolveValue(block.repeatCount, currentVariables, 1)));
-          for (let i = 0; i < count; i++) {
-            executeBlockList(block.childBlocks, currentPositions, currentVariables);
-          }
-        } else if (block.repeatType === 'forever') {
-          executeBlockList(block.childBlocks, currentPositions, currentVariables);
-        }
-      }
-    });
-  };
-
-  // Execute a block stack triggered by an event
-  const executeEvent = (
-    eventType: 'start' | 'key_up' | 'key_down' | 'key_left' | 'key_right' | 'key_num',
-    keyNum?: number
-  ) => {
-    // If game has ended, ignore movement inputs
-    if (gameState !== 'playing' && eventType !== 'start') return;
-
-    const matchingScripts = program.scripts.filter((s) => {
-      if (s.eventBlock.eventType !== eventType) return false;
-      if (eventType === 'key_num' && s.eventBlock.keyNum !== keyNum) return false;
-      return true;
-    });
-
-    if (matchingScripts.length === 0) return;
-
-    setSpritePositions((prevPos) => {
-      const nextPos = { ...prevPos };
-
-      setVariables((prevVars) => {
-        const nextVars = { ...prevVars };
-
-        matchingScripts.forEach((script) => {
-          executeBlockList(script.actionBlocks, nextPos, nextVars);
-        });
-
-        return nextVars;
-      });
-
-      drawGame(nextPos);
-      return nextPos;
-    });
   };
 
   // Draw 128x128 canvas
@@ -268,10 +95,235 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
     });
   };
 
+  // Execute a list of blocks asynchronously
+  const executeBlockList = async (
+    blockList: ProgramBlock[],
+    sessionId: number
+  ): Promise<void> => {
+    for (const block of blockList) {
+      if (sessionId !== gameSessionIdRef.current || gameStateRef.current !== 'playing') {
+        return;
+      }
+
+      // 1. ACTION: Move step (動かす)
+      if (block.category === 'action' && block.actionType === 'move_step' && block.spriteId) {
+        const current = positionsRef.current[block.spriteId] || { x: 0, y: 0 };
+        const stepVal = resolveValue(block.steps, variablesRef.current, 8);
+        let dx = 0;
+        let dy = 0;
+        if (block.direction === 'up') dy = -stepVal;
+        if (block.direction === 'down') dy = stepVal;
+        if (block.direction === 'left') dx = -stepVal;
+        if (block.direction === 'right') dx = stepVal;
+
+        const nextPos = {
+          x: Math.max(0, Math.min(112, current.x + dx)),
+          y: Math.max(0, Math.min(112, current.y + dy)),
+        };
+
+        positionsRef.current = {
+          ...positionsRef.current,
+          [block.spriteId]: nextPos,
+        };
+        setSpritePositions({ ...positionsRef.current });
+        drawGame(positionsRef.current);
+      }
+
+      // 2. ACTION: Set Pos (座標指定)
+      if (block.category === 'action' && block.actionType === 'set_pos' && block.spriteId) {
+        const posX = resolveValue(block.posX, variablesRef.current, 0);
+        const posY = resolveValue(block.posY, variablesRef.current, 0);
+        const nextPos = {
+          x: Math.max(0, Math.min(112, posX)),
+          y: Math.max(0, Math.min(112, posY)),
+        };
+
+        positionsRef.current = {
+          ...positionsRef.current,
+          [block.spriteId]: nextPos,
+        };
+        setSpritePositions({ ...positionsRef.current });
+        drawGame(positionsRef.current);
+      }
+
+      // 3. ACTION: 〇秒待つ (Wait X seconds)
+      if (block.category === 'action' && block.actionType === 'wait_seconds') {
+        const sec = Math.max(0.01, resolveValue(block.waitSeconds, variablesRef.current, 1));
+        await sleep(sec * 1000);
+        if (sessionId !== gameSessionIdRef.current || gameStateRef.current !== 'playing') {
+          return;
+        }
+      }
+
+      // 4. FEATURE: Dialog / Game Clear / Game Over
+      if (block.category === 'feature') {
+        if (block.featureAction === 'show_dialog' && block.featureText) {
+          const text = interpolateText(block.featureText, variablesRef.current);
+          setDialogText(text);
+        } else if (block.featureAction === 'hide_dialog') {
+          setDialogText(null);
+        } else if (block.featureAction === 'game_clear') {
+          gameStateRef.current = 'clear';
+          setGameState('clear');
+          const msg = block.featureText
+            ? interpolateText(block.featureText, variablesRef.current)
+            : 'おめでとう！ゲームクリア！';
+          setEndMessage(msg);
+          return;
+        } else if (block.featureAction === 'game_over') {
+          gameStateRef.current = 'gameover';
+          setGameState('gameover');
+          const msg = block.featureText
+            ? interpolateText(block.featureText, variablesRef.current)
+            : 'ゲームオーバー…！もう一度挑戦しよう';
+          setEndMessage(msg);
+          return;
+        }
+      }
+
+      // 5. VARIABLE: set, add, sub
+      if (block.category === 'variable' && block.varName) {
+        const currentVal = variablesRef.current[block.varName] ?? 0;
+        const opVal = resolveValue(block.varValue, variablesRef.current, 1);
+        let nextVal = currentVal;
+        if (block.varOp === 'set') {
+          nextVal = opVal;
+        } else if (block.varOp === 'add') {
+          nextVal = currentVal + opVal;
+        } else if (block.varOp === 'sub') {
+          nextVal = currentVal - opVal;
+        }
+        variablesRef.current = { ...variablesRef.current, [block.varName]: nextVal };
+        setVariables({ ...variablesRef.current });
+      }
+
+      // 6. CHECK / 検査: 〇〇が〇〇に触れていたら
+      if (block.category === 'check' && block.checkSpriteA && block.checkSpriteB) {
+        const posA = positionsRef.current[block.checkSpriteA];
+        const posB = positionsRef.current[block.checkSpriteB];
+        if (posA && posB) {
+          const isTouching = Math.abs(posA.x - posB.x) < 16 && Math.abs(posA.y - posB.y) < 16;
+          if (isTouching && block.childBlocks && block.childBlocks.length > 0) {
+            await executeBlockList(block.childBlocks, sessionId);
+          }
+        }
+      }
+
+      // 7. LOOP / 繰り返し: 〇〇回またはずっと
+      if (block.category === 'loop' && block.childBlocks && block.childBlocks.length > 0) {
+        if (block.repeatType === 'count') {
+          const count = Math.max(1, Math.min(1000, resolveValue(block.repeatCount, variablesRef.current, 1)));
+          for (let i = 0; i < count; i++) {
+            if (sessionId !== gameSessionIdRef.current || gameStateRef.current !== 'playing') return;
+            await executeBlockList(block.childBlocks, sessionId);
+          }
+        } else if (block.repeatType === 'forever') {
+          while (sessionId === gameSessionIdRef.current && gameStateRef.current === 'playing') {
+            await executeBlockList(block.childBlocks, sessionId);
+            await sleep(50);
+          }
+        }
+      }
+    }
+  };
+
+  // Run 'forever' (ずっと実行する) Event scripts loop
+  const startForeverScriptsLoop = async (sessionId: number) => {
+    const foreverScripts = program.scripts.filter((s) => s.eventBlock.eventType === 'forever');
+    if (foreverScripts.length === 0) return;
+
+    while (sessionId === gameSessionIdRef.current && gameStateRef.current === 'playing') {
+      for (const script of foreverScripts) {
+        if (sessionId !== gameSessionIdRef.current || gameStateRef.current !== 'playing') return;
+        await executeBlockList(script.actionBlocks, sessionId);
+      }
+      await sleep(100);
+    }
+  };
+
+  // Execute a block stack triggered by an event
+  const executeEvent = async (
+    eventType: 'start' | 'key_up' | 'key_down' | 'key_left' | 'key_right' | 'key_num',
+    keyNum?: number
+  ) => {
+    if (gameStateRef.current !== 'playing' && eventType !== 'start') return;
+
+    const matchingScripts = program.scripts.filter((s) => {
+      if (s.eventBlock.eventType !== eventType) return false;
+      if (eventType === 'key_num' && s.eventBlock.keyNum !== keyNum) return false;
+      return true;
+    });
+
+    if (matchingScripts.length === 0) return;
+
+    const currentSession = gameSessionIdRef.current;
+    for (const script of matchingScripts) {
+      if (currentSession !== gameSessionIdRef.current) break;
+      await executeBlockList(script.actionBlocks, currentSession);
+    }
+  };
+
+  // Reset / Initialize game
+  const resetGame = () => {
+    gameSessionIdRef.current += 1;
+    const thisSession = gameSessionIdRef.current;
+
+    gameStateRef.current = 'playing';
+    setGameState('playing');
+    setEndMessage(null);
+    setDialogText(null);
+
+    const initPos: Record<string, { x: number; y: number }> = {};
+    program.sprites.forEach((sp) => {
+      initPos[sp.id] = { x: sp.initialX, y: sp.initialY };
+    });
+    positionsRef.current = initPos;
+    setSpritePositions(initPos);
+
+    // Initial variables: default to { 'スコア': 0 } if not defined
+    const defaultVars: Record<string, number> = { 'スコア': 0 };
+    const mergedVars = { ...defaultVars, ...(program.variables || {}) };
+    variablesRef.current = mergedVars;
+    setVariables(mergedVars);
+
+    // Preload background
+    const bgImg = new Image();
+    bgImg.onload = () => {
+      bgImageRef.current = bgImg;
+      drawGame(initPos);
+    };
+    bgImg.src = program.backgroundDataUrl;
+
+    // Preload sprites
+    program.sprites.forEach((sp) => {
+      const spImg = new Image();
+      spImg.onload = () => {
+        spriteImagesRef.current[sp.id] = spImg;
+        drawGame(initPos);
+      };
+      spImg.src = sp.dataUrl;
+    });
+
+    // Execute 'start' event blocks and start 'forever' event loops
+    setTimeout(() => {
+      if (thisSession === gameSessionIdRef.current) {
+        executeEvent('start');
+        startForeverScriptsLoop(thisSession);
+      }
+    }, 60);
+  };
+
+  useEffect(() => {
+    resetGame();
+    return () => {
+      gameSessionIdRef.current += 1;
+    };
+  }, [program]);
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (gameState !== 'playing') return;
+      if (gameStateRef.current !== 'playing') return;
 
       if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -295,12 +347,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [program, gameState]);
-
-  // Re-draw when positions change
-  useEffect(() => {
-    drawGame(spritePositions);
-  }, [spritePositions]);
+  }, [program]);
 
   const activeVars = Object.entries(variables);
 
@@ -452,7 +499,10 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
               ) : (
                 <button
                   type="button"
-                  onClick={() => setGameState('playing')}
+                  onClick={() => {
+                    gameStateRef.current = 'playing';
+                    setGameState('playing');
+                  }}
                   className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold border border-white/20 active:scale-95 transition-all"
                 >
                   閉じる

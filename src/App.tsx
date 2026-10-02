@@ -88,10 +88,10 @@ export function App() {
             </div>
             <div>
               <h1 className="font-bold text-lg sm:text-xl tracking-tight text-neutral-900 leading-none">
-                新聞ツクール
+                ティックエディション
               </h1>
-              <span className="text-[10px] text-neutral-400 font-mono tracking-wider">
-                SHINBUN TSUKURU
+              <span className="text-[10px] text-neutral-400 font-bold tracking-wider">
+                プログラム教材 / TICK EDITION
               </span>
             </div>
           </button>
@@ -145,14 +145,14 @@ export function App() {
             
             {/* Welcome Headline */}
             <div className="text-center mb-10">
-              <div className="inline-block px-3 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-neutral-600 text-xs font-medium mb-3">
-                シンプル＆ホワイトデザイン
+              <div className="inline-block px-3 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-neutral-700 text-xs font-bold mb-3">
+                プログラム教材
               </div>
               <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-neutral-900">
-                新聞ツクール ホーム
+                ティックエディション
               </h2>
               <p className="text-sm text-neutral-500 mt-2">
-                新聞の閲覧・作成や、ツール（動画・プログラム）の作成＆閲覧ができます
+                新聞の閲覧・作成や、ドット絵アニメーション動画・ゲームプログラミング教材を体験できます
               </p>
             </div>
 
@@ -270,7 +270,7 @@ export function App() {
 
       {/* FOOTER */}
       <footer className="w-full border-t border-neutral-200 py-6 text-center text-xs text-neutral-400 bg-white">
-        <p>© 新聞ツクール (sinnbunntukuru) - シンプル＆ホワイトデザイン</p>
+        <p>© ティックエディション (プログラム教材)</p>
       </footer>
 
       {/* SETTINGS MODAL */}

@@ -31,6 +31,7 @@ export type BlockCategory = 'event' | 'action' | 'feature' | 'variable' | 'check
 
 export type EventType =
   | 'start' // ゲームがスタートされた
+  | 'forever' // ずっと実行する (常時ループ)
   | 'key_up' // 上キーが押された
   | 'key_down' // 下キーが押された
   | 'key_left' // 左キーが押された
@@ -45,13 +46,14 @@ export interface ProgramBlock {
   eventType?: EventType;
   keyNum?: number; // 1 ~ 9
   
-  // Action (動作: 動かす / 座標設定)
-  actionType?: 'move_step' | 'set_pos';
+  // Action (動作: 動かす / 座標設定 / 〇秒待つ)
+  actionType?: 'move_step' | 'set_pos' | 'wait_seconds';
   spriteId?: string;
   direction?: 'up' | 'down' | 'left' | 'right';
   steps?: number | string; // literal number OR variable name (e.g. "スコア1")
   posX?: number | string;  // literal number OR variable name
   posY?: number | string;  // literal number OR variable name
+  waitSeconds?: number | string; // 〇秒待つ (e.g. 1 or 0.5 or variable name)
 
   // Feature (機能: ダイアログ表示 / 閉じる / ゲームクリア / ゲームオーバー)
   featureText?: string; // 20文字まで (ダイアログまたはクリア/ゲームオーバー時メッセージ)

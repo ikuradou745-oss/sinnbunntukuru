@@ -56,10 +56,10 @@ export const RegistrationModal: React.FC<RegistrationModalProps> = ({ onComplete
             <Newspaper className="w-7 h-7 text-white" />
           </div>
           <h2 className="text-2xl font-black tracking-tight text-neutral-900">
-            新聞ツクールへようこそ
+            ティックエディションへようこそ
           </h2>
           <p className="text-xs text-neutral-500 mt-1">
-            はじめる前に、あなたのプロフィールを設定しましょう
+            プログラム教材プラットフォームへようこそ！あなたのプロフィールを設定しましょう
           </p>
 
           {/* Step Indicator */}

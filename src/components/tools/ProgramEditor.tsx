@@ -435,6 +435,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
         spriteId: defaultSprite,
         direction: 'up',
         steps: 8,
+        waitSeconds: 1,
       };
     } else if (category === 'feature') {
       return {
@@ -620,82 +621,97 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
       >
         <div className="flex flex-wrap items-center justify-between gap-2">
           
-          {/* 1. ACTION (動作) */}
+          {/* 1. ACTION (動作: 動かす / 座標指定 / 〇秒待つ) */}
           {block.category === 'action' && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[10px]">
                 動作
               </span>
               <select
-                value={block.actionType}
+                value={block.actionType || 'move_step'}
                 onChange={(e) => {
-                  const val = e.target.value as 'move_step' | 'set_pos';
+                  const val = e.target.value as 'move_step' | 'set_pos' | 'wait_seconds';
                   handleUpdateBlockInTree(block.id, (b) => ({ ...b, actionType: val }));
                 }}
                 className="bg-neutral-100 border border-neutral-300 rounded px-1.5 py-1 font-bold text-xs"
               >
                 <option value="move_step">動かす</option>
                 <option value="set_pos">座標指定</option>
+                <option value="wait_seconds">〇秒待つ ⏱️</option>
               </select>
 
-              <select
-                value={block.spriteId}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  handleUpdateBlockInTree(block.id, (b) => ({ ...b, spriteId: val }));
-                }}
-                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold text-xs"
-              >
-                {sprites.map((sp) => (
-                  <option key={sp.id} value={sp.id}>
-                    {sp.name}
-                  </option>
-                ))}
-              </select>
-
-              <span>を</span>
-
-              {block.actionType === 'move_step' ? (
-                <>
+              {block.actionType === 'wait_seconds' ? (
+                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900">
                   <ValueInput
-                    value={block.steps}
-                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, steps: val }))}
+                    value={block.waitSeconds}
+                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, waitSeconds: val }))}
                     availableVariables={varNames}
-                    defaultValue={8}
+                    defaultValue={1}
                   />
-                  <span>マス</span>
-                  <select
-                    value={block.direction}
-                    onChange={(e) => {
-                      const val = e.target.value as 'up' | 'down' | 'left' | 'right';
-                      handleUpdateBlockInTree(block.id, (b) => ({ ...b, direction: val }));
-                    }}
-                    className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
-                  >
-                    <option value="up">上</option>
-                    <option value="down">下</option>
-                    <option value="left">左</option>
-                    <option value="right">右</option>
-                  </select>
-                  <span>に動かす</span>
-                </>
+                  <span>秒待つ</span>
+                </div>
               ) : (
                 <>
-                  <span>左から</span>
-                  <ValueInput
-                    value={block.posX}
-                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posX: val }))}
-                    availableVariables={varNames}
-                    defaultValue={32}
-                  />
-                  <span>マス、上から</span>
-                  <ValueInput
-                    value={block.posY}
-                    onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posY: val }))}
-                    availableVariables={varNames}
-                    defaultValue={48}
-                  />
-                  <span>マスにする</span>
+                  <select
+                    value={block.spriteId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      handleUpdateBlockInTree(block.id, (b) => ({ ...b, spriteId: val }));
+                    }}
+                    className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold text-xs"
+                  >
+                    {sprites.map((sp) => (
+                      <option key={sp.id} value={sp.id}>
+                        {sp.name}
+                      </option>
+                    ))}
+                  </select>
+
+                  <span>を</span>
+
+                  {block.actionType === 'move_step' ? (
+                    <>
+                      <ValueInput
+                        value={block.steps}
+                        onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, steps: val }))}
+                        availableVariables={varNames}
+                        defaultValue={8}
+                      />
+                      <span>マス</span>
+                      <select
+                        value={block.direction}
+                        onChange={(e) => {
+                          const val = e.target.value as 'up' | 'down' | 'left' | 'right';
+                          handleUpdateBlockInTree(block.id, (b) => ({ ...b, direction: val }));
+                        }}
+                        className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+                      >
+                        <option value="up">上</option>
+                        <option value="down">下</option>
+                        <option value="left">左</option>
+                        <option value="right">右</option>
+                      </select>
+                      <span>に動かす</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>左から</span>
+                      <ValueInput
+                        value={block.posX}
+                        onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posX: val }))}
+                        availableVariables={varNames}
+                        defaultValue={32}
+                      />
+                      <span>マス、上から</span>
+                      <ValueInput
+                        value={block.posY}
+                        onChange={(val) => handleUpdateBlockInTree(block.id, (b) => ({ ...b, posY: val }))}
+                        availableVariables={varNames}
+                        defaultValue={48}
+                      />
+                      <span>マスにする</span>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -1440,6 +1456,13 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                 </button>
                 <button
                   type="button"
+                  onClick={() => handleAddEventScript('forever')}
+                  className="p-2 bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold rounded-xl border border-teal-200 text-left"
+                >
+                  🔄 ずっと実行する
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleAddEventScript('key_up')}
                   className="p-2 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold rounded-xl border border-amber-200 text-left"
                 >
@@ -1493,6 +1516,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                     <span className="px-2 py-0.5 bg-black/20 rounded-md font-mono">実行</span>
                     <span>
                       {script.eventBlock.eventType === 'start' && '【ゲームがスタートされた】'}
+                      {script.eventBlock.eventType === 'forever' && '【ずっと実行する (常時ループ)】'}
                       {script.eventBlock.eventType === 'key_up' && '【上キーが押された】'}
                       {script.eventBlock.eventType === 'key_down' && '【下キーが押された】'}
                       {script.eventBlock.eventType === 'key_left' && '【左キーが押された】'}

@@ -439,7 +439,7 @@ async function startServer() {
   }
 
   app.listen(PORT, HOST, () => {
-    console.log(`[新聞ツクール] Server running at http://${HOST}:${PORT}`);
+    console.log(`[ティックエディション] Server running at http://${HOST}:${PORT}`);
   });
 }
 
