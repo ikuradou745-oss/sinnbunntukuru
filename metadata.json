@@ -1,0 +1,8 @@
+{
+  "name": "新聞つくる (sinnbunntukuru)",
+  "description": "本格的なオリジナル新聞を作成・編集・印刷・画像保存できるWebツール。見出し、縦書き記事、写真、天気予報、連載コラムなどを自由にレイアウトできます。",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

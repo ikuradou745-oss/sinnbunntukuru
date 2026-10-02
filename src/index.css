@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Noto Serif JP', 'Zen Old Mincho', serif;
+  }
+}
+
+/* Authentic Japanese Newspaper Vertical Text Utilities */
+.writing-v {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.08em;
+}
+
+.writing-v-mixed {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  letter-spacing: 0.05em;
+}
+
+/* Newspaper Grid Borders */
+.border-newspaper-double {
+  border-style: double;
+  border-width: 4px;
+}
+
+.border-newspaper-thick-thin {
+  border-top-width: 3px;
+  border-bottom-width: 1px;
+}
+
+/* Paper grain subtle effect */
+.newspaper-texture {
+  background-color: #f7f4ed;
+  background-image: 
+    radial-gradient(#d3cbbd 0.75px, transparent 0.75px), 
+    radial-gradient(#d3cbbd 0.75px, #f7f4ed 0.75px);
+  background-size: 30px 30px;
+  background-position: 0 0, 15px 15px;
+}
+
+.newspaper-paper-clean {
+  background-color: #faf8f5;
+}
+
+.newspaper-paper-retro {
+  background-color: #efe8dc;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1ede4;
+}
+::-webkit-scrollbar-thumb {
+  background: #c2baa8;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9d9380;
+}
+
+@media print {
+  body {
+    background: white !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-page {
+    box-shadow: none !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border: none !important;
+  }
+}
