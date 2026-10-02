@@ -393,11 +393,20 @@ app.post('/api/programs/:id/view', (req, res) => {
   res.json({ success: true });
 });
 
+app.get('/favicon.ico', (req, res) => {
+  const icoPath = path.join(__dirname, 'public', 'favicon.ico');
+  if (fs.existsSync(icoPath)) {
+    res.sendFile(icoPath);
+  } else {
+    res.status(204).end();
+  }
+});
+
 // Setup Vite middleware or static serving
 async function startServer() {
   if (process.env.NODE_ENV === 'production' && fs.existsSync(path.join(__dirname, 'dist'))) {
     app.use(express.static(path.join(__dirname, 'dist')));
-    app.get('*', (req, res) => {
+    app.use((req, res) => {
       res.sendFile(path.join(__dirname, 'dist', 'index.html'));
     });
   } else {
@@ -410,6 +419,23 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // SPA fallback: handle client-side routing and HTML requests in dev
+    app.use(async (req, res, next) => {
+      const url = req.originalUrl;
+      // Skip API routes so they 404 properly if non-existent
+      if (url.startsWith('/api')) {
+        return next();
+      }
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        vite.ssrFixStacktrace(e as Error);
+        next(e);
+      }
+    });
   }
 
   app.listen(PORT, HOST, () => {
