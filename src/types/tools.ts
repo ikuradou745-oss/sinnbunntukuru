@@ -53,9 +53,9 @@ export interface ProgramBlock {
   posX?: number | string;  // literal number OR variable name
   posY?: number | string;  // literal number OR variable name
 
-  // Feature (機能: ダイアログ表示 / 閉じる)
-  featureText?: string; // 20文字まで
-  featureAction?: 'show_dialog' | 'hide_dialog';
+  // Feature (機能: ダイアログ表示 / 閉じる / ゲームクリア / ゲームオーバー)
+  featureText?: string; // 20文字まで (ダイアログまたはクリア/ゲームオーバー時メッセージ)
+  featureAction?: 'show_dialog' | 'hide_dialog' | 'game_clear' | 'game_over';
 
   // Variable (変数操作)
   varName?: string;

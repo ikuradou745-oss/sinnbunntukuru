@@ -393,10 +393,10 @@ app.post('/api/programs/:id/view', (req, res) => {
   res.json({ success: true });
 });
 
-app.get('/favicon.ico', (req, res) => {
-  const icoPath = path.join(__dirname, 'public', 'favicon.ico');
-  if (fs.existsSync(icoPath)) {
-    res.sendFile(icoPath);
+app.get(['/favicon.ico', '/apple-touch-icon.png', '/apple-touch-icon-precomposed.png', '/robots.txt', '/site.webmanifest'], (req, res) => {
+  const filePath = path.join(__dirname, 'public', req.path.slice(1));
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
   } else {
     res.status(204).end();
   }

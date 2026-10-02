@@ -36,13 +36,9 @@ const BG_PALETTE = [
   '#15803d', '#1e40af', '#b45309', '#7f1d1d',
 ];
 
-// Generate default variables: スコア1 〜 スコア10
-const createDefaultScoreVariables = (): Record<string, number> => {
-  const vars: Record<string, number> = {};
-  for (let i = 1; i <= 10; i++) {
-    vars[`スコア${i}`] = 0;
-  }
-  return vars;
+// Generate default variables: スコアのみ (変数は15個まで追加可能)
+const createDefaultVariables = (): Record<string, number> => {
+  return { 'スコア': 0 };
 };
 
 export const ProgramEditor: React.FC<ProgramEditorProps> = ({
@@ -59,8 +55,8 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
   const [selectedSpriteId, setSelectedSpriteId] = useState<string | null>(null);
   const [activeNumberKeys, setActiveNumberKeys] = useState<number[]>([1, 2]);
   
-  // Variables (with スコア1〜10 pre-loaded)
-  const [variables, setVariables] = useState<Record<string, number>>(createDefaultScoreVariables());
+  // Variables (初期は「スコア」のみ、最大15個まで追加可能)
+  const [variables, setVariables] = useState<Record<string, number>>(createDefaultVariables());
   const [newVarName, setNewVarName] = useState<string>('');
   const [scripts, setScripts] = useState<ProgramEventScript[]>([]);
 
@@ -280,7 +276,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
               {
                 id: 'b-add-score',
                 category: 'variable',
-                varName: 'スコア1',
+                varName: 'スコア',
                 varOp: 'add',
                 varValue: 10,
               },
@@ -288,7 +284,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                 id: 'b-show-score',
                 category: 'feature',
                 featureAction: 'show_dialog',
-                featureText: '宝箱を開けた！スコア1: {スコア1}',
+                featureText: '宝箱を開けた！スコア: {スコア}',
               },
             ],
           },
@@ -415,11 +411,12 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
     }
   };
 
-  // Add Custom Variable
+  // Add Custom Variable (Max 15)
   const handleAddVariable = (e: React.FormEvent) => {
     e.preventDefault();
     const vName = newVarName.trim();
     if (!vName || variables[vName] !== undefined) return;
+    if (Object.keys(variables).length >= 15) return;
     setVariables({ ...variables, [vName]: 0 });
     setNewVarName('');
   };
@@ -428,7 +425,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
   const createNewBlock = (category: ProgramBlock['category']): ProgramBlock => {
     const defaultSprite = sprites[0]?.id || '';
     const secondSprite = sprites[1]?.id || sprites[0]?.id || '';
-    const defaultVar = varNames[0] || 'スコア1';
+    const defaultVar = varNames[0] || 'スコア';
 
     if (category === 'action') {
       return {
@@ -704,25 +701,29 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
             </div>
           )}
 
-          {/* 2. FEATURE (機能) */}
+          {/* 2. FEATURE (機能: ダイアログ / ゲームクリア / ゲームオーバー) */}
           {block.category === 'feature' && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold text-[10px]">
                 機能
               </span>
               <select
-                value={block.featureAction}
+                value={block.featureAction || 'show_dialog'}
                 onChange={(e) => {
-                  const val = e.target.value as 'show_dialog' | 'hide_dialog';
+                  const val = e.target.value as 'show_dialog' | 'hide_dialog' | 'game_clear' | 'game_over';
                   handleUpdateBlockInTree(block.id, (b) => ({ ...b, featureAction: val }));
                 }}
-                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold"
+                className="bg-neutral-100 border border-neutral-300 rounded px-2 py-1 font-bold text-xs"
               >
                 <option value="show_dialog">テキストダイアログを表示</option>
                 <option value="hide_dialog">テキストダイアログを閉じる</option>
+                <option value="game_clear">🎉 ゲームクリアにする</option>
+                <option value="game_over">💀 ゲームオーバーにする</option>
               </select>
 
-              {block.featureAction === 'show_dialog' && (
+              {(block.featureAction === 'show_dialog' ||
+                block.featureAction === 'game_clear' ||
+                block.featureAction === 'game_over') && (
                 <div className="flex items-center gap-1.5">
                   <input
                     type="text"
@@ -732,8 +733,14 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                       const val = e.target.value;
                       handleUpdateBlockInTree(block.id, (b) => ({ ...b, featureText: val }));
                     }}
-                    placeholder="20文字まで (例: スコア1: {スコア1})"
-                    className="w-48 bg-neutral-100 border border-neutral-300 rounded px-2 py-1 text-xs"
+                    placeholder={
+                      block.featureAction === 'game_clear'
+                        ? 'クリアメッセージ (例: 制覇！)'
+                        : block.featureAction === 'game_over'
+                        ? 'オーバー時メッセージ (例: やられた…)'
+                        : 'ダイアログ (例: スコア: {スコア})'
+                    }
+                    className="w-52 bg-neutral-100 border border-neutral-300 rounded px-2 py-1 text-xs"
                   />
                   <select
                     onChange={(e) => {
@@ -981,7 +988,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-neutral-500">
-              128×128 px | スコア1〜10、検査（衝突判定）、繰り返しブロック対応
+              128×128 px | ゲームクリア/ゲームオーバー、衝突判定、繰り返しブロック対応
             </p>
           </div>
         </div>
@@ -1352,17 +1359,17 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
       {activeTab === 'blocks' && (
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
           
-          {/* Variables Manager Sidebar (スコア1〜10) */}
+          {/* Variables Manager Sidebar (初期はスコアのみ、最大15個まで) */}
           <div className="md:col-span-4 bg-white p-5 rounded-3xl border border-neutral-200 space-y-4">
             <div className="border-b border-neutral-200 pb-3">
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-sm text-neutral-800">変数マネージャー</h3>
-                <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded">
-                  スコア1〜10完備
+                <span className="text-[10px] bg-amber-100 text-amber-900 font-bold px-2 py-0.5 rounded-full">
+                  {varNames.length} / 15 個
                 </span>
               </div>
               <p className="text-[11px] text-neutral-500 mt-1">
-                ブロックの値に変数を指定して動かすことができます。
+                初期は「スコア」のみで、最大15個まで自由に変数を追加できます。
               </p>
             </div>
 
@@ -1370,13 +1377,15 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
               <input
                 type="text"
                 value={newVarName}
+                disabled={varNames.length >= 15}
                 onChange={(e) => setNewVarName(e.target.value)}
-                placeholder="カスタム変数追加 (例: HP)"
-                className="flex-1 px-3 py-1.5 bg-neutral-50 border border-neutral-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                placeholder={varNames.length >= 15 ? '最大15個に達しました' : 'カスタム変数追加 (例: コイン)'}
+                className="flex-1 px-3 py-1.5 bg-neutral-50 border border-neutral-300 rounded-xl text-xs focus:outline-none focus:ring-1 focus:ring-neutral-900 disabled:opacity-50"
               />
               <button
                 type="submit"
-                className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 text-white rounded-xl text-xs font-bold"
+                disabled={varNames.length >= 15 || !newVarName.trim()}
+                className="px-3 py-1.5 bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 text-white rounded-xl text-xs font-bold"
               >
                 追加
               </button>
@@ -1399,7 +1408,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                       }
                       className="w-12 px-1 py-0.5 bg-white border border-neutral-300 rounded text-center text-xs"
                     />
-                    {!vName.startsWith('スコア') && (
+                    {varNames.length > 1 && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1408,6 +1417,7 @@ export const ProgramEditor: React.FC<ProgramEditorProps> = ({
                           setVariables(copy);
                         }}
                         className="text-neutral-400 hover:text-red-600 p-0.5"
+                        title="変数を削除"
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>

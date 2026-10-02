@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ProgramToolItem, ProgramBlock } from '../../types/tools';
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, RotateCcw, X } from 'lucide-react';
+import {
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  RotateCcw,
+  X,
+  Trophy,
+  Skull,
+  Play,
+  Award,
+} from 'lucide-react';
 
 interface GameRuntimeProps {
   program: ProgramToolItem;
@@ -20,6 +31,10 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
   // Dialog state
   const [dialogText, setDialogText] = useState<string | null>(null);
 
+  // Game End State: playing / clear / gameover
+  const [gameState, setGameState] = useState<'playing' | 'clear' | 'gameover'>('playing');
+  const [endMessage, setEndMessage] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
   const spriteImagesRef = useRef<Record<string, HTMLImageElement>>({});
@@ -34,7 +49,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
     return isNaN(parsed) ? fallback : parsed;
   };
 
-  // Interpolate variable values in text, e.g. "スコア1: {スコア1}"
+  // Interpolate variable values in text, e.g. "スコア: {スコア}"
   const interpolateText = (text: string, currentVars: Record<string, number>) => {
     let result = text;
     Object.keys(currentVars).forEach((vKey) => {
@@ -50,20 +65,20 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
       loopIntervalRef.current = null;
     }
 
+    setGameState('playing');
+    setEndMessage(null);
+    setDialogText(null);
+
     const initPos: Record<string, { x: number; y: number }> = {};
     program.sprites.forEach((sp) => {
       initPos[sp.id] = { x: sp.initialX, y: sp.initialY };
     });
     setSpritePositions(initPos);
 
-    // Initial variables: ensure スコア1〜10 exist
-    const defaultVars: Record<string, number> = {};
-    for (let i = 1; i <= 10; i++) {
-      defaultVars[`スコア${i}`] = 0;
-    }
+    // Initial variables: default to { 'スコア': 0 } if not defined
+    const defaultVars: Record<string, number> = { 'スコア': 0 };
     const mergedVars = { ...defaultVars, ...(program.variables || {}) };
     setVariables(mergedVars);
-    setDialogText(null);
 
     // Preload background
     const bgImg = new Image();
@@ -130,13 +145,25 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
         };
       }
 
-      // 3. FEATURE: Dialog
+      // 3. FEATURE: Dialog / Game Clear / Game Over
       if (block.category === 'feature') {
         if (block.featureAction === 'show_dialog' && block.featureText) {
           const text = interpolateText(block.featureText, currentVariables);
           setDialogText(text);
         } else if (block.featureAction === 'hide_dialog') {
           setDialogText(null);
+        } else if (block.featureAction === 'game_clear') {
+          setGameState('clear');
+          const msg = block.featureText
+            ? interpolateText(block.featureText, currentVariables)
+            : 'おめでとう！ゲームクリア！';
+          setEndMessage(msg);
+        } else if (block.featureAction === 'game_over') {
+          setGameState('gameover');
+          const msg = block.featureText
+            ? interpolateText(block.featureText, currentVariables)
+            : 'ゲームオーバー…！もう一度挑戦しよう';
+          setEndMessage(msg);
         }
       }
 
@@ -174,7 +201,6 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
             executeBlockList(block.childBlocks, currentPositions, currentVariables);
           }
         } else if (block.repeatType === 'forever') {
-          // Loop once on trigger, and setup continuous tick
           executeBlockList(block.childBlocks, currentPositions, currentVariables);
         }
       }
@@ -186,6 +212,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
     eventType: 'start' | 'key_up' | 'key_down' | 'key_left' | 'key_right' | 'key_num',
     keyNum?: number
   ) => {
+    // If game has ended, ignore movement inputs
+    if (gameState !== 'playing' && eventType !== 'start') return;
+
     const matchingScripts = program.scripts.filter((s) => {
       if (s.eventBlock.eventType !== eventType) return false;
       if (eventType === 'key_num' && s.eventBlock.keyNum !== keyNum) return false;
@@ -242,6 +271,8 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (gameState !== 'playing') return;
+
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         executeEvent('key_up');
@@ -264,17 +295,14 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [program]);
+  }, [program, gameState]);
 
   // Re-draw when positions change
   useEffect(() => {
     drawGame(spritePositions);
   }, [spritePositions]);
 
-  // Format variables for display (only non-zero or first 4)
-  const activeVars = Object.entries(variables).filter(
-    ([k, v]) => v !== 0 || ['スコア1', 'スコア2'].includes(k)
-  );
+  const activeVars = Object.entries(variables);
 
   return (
     <div className="flex flex-col items-center gap-4 w-full select-none">
@@ -296,7 +324,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
         </div>
       )}
 
-      {/* Variables Display bar (スコア1〜10など) */}
+      {/* Variables Display bar (スコア・コイン・HPなど) */}
       <div className="flex flex-wrap items-center justify-between w-full max-w-[288px] px-3 py-1.5 bg-neutral-900 text-white rounded-xl text-xs font-mono">
         <div className="flex flex-wrap gap-2">
           {activeVars.length > 0 ? (
@@ -306,7 +334,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
               </span>
             ))
           ) : (
-            <span className="text-neutral-400 text-[11px]">スコア1: 0</span>
+            <span className="text-neutral-400 text-[11px]">スコア: 0</span>
           )}
         </div>
         <button
@@ -335,7 +363,7 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
         />
 
         {/* Text Dialog Overlay (機能: テキストダイアログを表示) */}
-        {dialogText && (
+        {dialogText && gameState === 'playing' && (
           <div className="absolute bottom-2 inset-x-2 bg-neutral-950/95 text-white p-2.5 rounded-xl border border-neutral-700 shadow-lg animate-fade-in text-xs leading-snug font-sans">
             <div className="flex items-start justify-between gap-1">
               <span className="font-medium">{dialogText}</span>
@@ -349,6 +377,90 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
             </div>
           </div>
         )}
+
+        {/* GAME CLEAR / GAME OVER OVERLAY */}
+        {gameState !== 'playing' && (
+          <div className="absolute inset-0 bg-neutral-950/90 flex flex-col items-center justify-between p-4 text-white animate-fade-in text-center z-20">
+            {/* Title Badge */}
+            <div className="mt-2">
+              {gameState === 'clear' ? (
+                <div className="flex flex-col items-center gap-1">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center shadow-lg animate-bounce">
+                    <Trophy className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-black text-amber-300 tracking-tight mt-1">
+                    ゲームクリア！
+                  </h3>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-1">
+                  <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 border border-red-500/40 flex items-center justify-center shadow-lg">
+                    <Skull className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-black text-red-400 tracking-tight mt-1">
+                    ゲームオーバー
+                  </h3>
+                </div>
+              )}
+
+              {/* Text Message */}
+              {endMessage && (
+                <p className="text-xs text-neutral-200 mt-1.5 leading-snug max-w-[240px]">
+                  {endMessage}
+                </p>
+              )}
+            </div>
+
+            {/* Scorecard Display (スコアの表示) */}
+            <div className="w-full bg-white/10 rounded-xl p-2.5 border border-white/15 my-2">
+              <div className="text-[10px] text-neutral-400 font-bold mb-1 flex items-center justify-center gap-1">
+                <Award className="w-3 h-3" />
+                <span>リザルトスコア</span>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2">
+                {activeVars.map(([k, v]) => (
+                  <div
+                    key={k}
+                    className="px-2.5 py-1 bg-black/40 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 border border-white/10"
+                  >
+                    <span className="text-neutral-300">{k}:</span>
+                    <span className="text-amber-300 text-sm">{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions: もう一度やるかやらないかを決めれる */}
+            <div className="w-full flex items-center gap-2 mb-1">
+              <button
+                type="button"
+                onClick={resetGame}
+                className="flex-1 py-2 px-3 bg-white text-neutral-900 hover:bg-neutral-100 rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 active:scale-95 transition-all"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>もう一度遊ぶ</span>
+              </button>
+
+              {onClose ? (
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold border border-white/20 active:scale-95 transition-all"
+                >
+                  終了する
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setGameState('playing')}
+                  className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white rounded-xl text-xs font-bold border border-white/20 active:scale-95 transition-all"
+                >
+                  閉じる
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Controller Pad Section (ゲーム画面の下) */}
@@ -358,8 +470,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
           <div />
           <button
             type="button"
+            disabled={gameState !== 'playing'}
             onClick={() => executeEvent('key_up')}
-            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
+            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-40 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
             aria-label="上"
           >
             <ArrowUp className="w-5 h-5" />
@@ -368,8 +481,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
 
           <button
             type="button"
+            disabled={gameState !== 'playing'}
             onClick={() => executeEvent('key_left')}
-            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
+            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-40 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
             aria-label="左"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -379,8 +493,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
           </div>
           <button
             type="button"
+            disabled={gameState !== 'playing'}
             onClick={() => executeEvent('key_right')}
-            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
+            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-40 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
             aria-label="右"
           >
             <ArrowRight className="w-5 h-5" />
@@ -389,8 +504,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
           <div />
           <button
             type="button"
+            disabled={gameState !== 'playing'}
             onClick={() => executeEvent('key_down')}
-            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
+            className="w-11 h-11 bg-neutral-900 hover:bg-neutral-800 active:bg-neutral-700 disabled:opacity-40 text-white rounded-xl shadow-md flex items-center justify-center transition-transform active:scale-90"
             aria-label="下"
           >
             <ArrowDown className="w-5 h-5" />
@@ -409,8 +525,9 @@ export const GameRuntime: React.FC<GameRuntimeProps> = ({
                 <button
                   key={num}
                   type="button"
+                  disabled={gameState !== 'playing'}
                   onClick={() => executeEvent('key_num', num)}
-                  className="w-10 h-10 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-sm shadow-md flex items-center justify-center transition-transform active:scale-90"
+                  className="w-10 h-10 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 disabled:opacity-40 text-white font-bold text-sm shadow-md flex items-center justify-center transition-transform active:scale-90"
                 >
                   {num}
                 </button>

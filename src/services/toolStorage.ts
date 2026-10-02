@@ -1,25 +1,45 @@
 import { VideoToolItem, ProgramToolItem } from '../types/tools';
 
-const LOCAL_VIDEO_KEY = 'shinbun_tsukuru_videos_local';
-const LOCAL_PROGRAM_KEY = 'shinbun_tsukuru_programs_local';
+const LOCAL_VIDEO_KEY = 'shinbun_tsukuru_videos_local_v2';
+const LOCAL_PROGRAM_KEY = 'shinbun_tsukuru_programs_local_v2';
 
-// Fetch Videos from Online API (with local fallback)
+// Helper to safely write to localStorage without throwing QuotaExceededError
+const safeSetLocal = (key: string, data: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.warn(`localStorage quota exceeded for ${key}, skipping local storage cache.`);
+    // If quota exceeded, attempt to prune old cache if needed
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  }
+};
+
+const safeGetLocal = <T>(key: string, fallback: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+// --- VIDEOS ONLINE ---
 export const fetchOnlineVideos = async (): Promise<VideoToolItem[]> => {
   try {
-    const res = await fetch('/api/videos');
+    const res = await fetch(`/api/videos?t=${Date.now()}`);
     if (res.ok) {
-      const data = await res.json();
-      localStorage.setItem(LOCAL_VIDEO_KEY, JSON.stringify(data));
+      const data: VideoToolItem[] = await res.json();
+      safeSetLocal(LOCAL_VIDEO_KEY, data);
       return data;
     }
   } catch (err) {
-    console.warn('Online API unavailable, using local cache:', err);
+    console.warn('Online API unavailable for videos, using local cache:', err);
   }
-  const cached = localStorage.getItem(LOCAL_VIDEO_KEY);
-  return cached ? JSON.parse(cached) : [];
+  return safeGetLocal<VideoToolItem[]>(LOCAL_VIDEO_KEY, []);
 };
 
-// Post Video to Online API
 export const saveOnlineVideo = async (
   video: VideoToolItem
 ): Promise<{ success: boolean; message?: string }> => {
@@ -30,41 +50,43 @@ export const saveOnlineVideo = async (
       body: JSON.stringify(video),
     });
     if (res.ok) {
-      // update local
-      const current = await fetchOnlineVideos();
+      // Re-fetch online list immediately
+      const updated = await fetchOnlineVideos();
       return { success: true };
     }
     const err = await res.json().catch(() => ({}));
-    return { success: false, message: err.error || '保存に失敗しました。' };
+    return { success: false, message: err.error || '動画の保存に失敗しました。' };
   } catch (err) {
-    console.warn('Failed to post online, saving locally', err);
-    // Local fallback
-    const list = getLocalVideos();
-    list.unshift(video);
-    localStorage.setItem(LOCAL_VIDEO_KEY, JSON.stringify(list));
+    console.warn('Failed to post video online, saving locally', err);
+    const list = safeGetLocal<VideoToolItem[]>(LOCAL_VIDEO_KEY, []);
+    const existingIdx = list.findIndex((v) => v.id === video.id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = video;
+    } else {
+      list.unshift(video);
+    }
+    safeSetLocal(LOCAL_VIDEO_KEY, list);
     return { success: true };
   }
 };
 
-// Delete Video Online
 export const deleteOnlineVideo = async (id: string, authorName: string): Promise<boolean> => {
   try {
     const res = await fetch(`/api/videos/${id}?author=${encodeURIComponent(authorName)}`, {
       method: 'DELETE',
     });
     if (res.ok) {
+      await fetchOnlineVideos();
       return true;
     }
   } catch (err) {
-    console.warn('Failed to delete online', err);
+    console.warn('Failed to delete video online', err);
   }
-  // Local fallback
-  const list = getLocalVideos().filter((v) => v.id !== id);
-  localStorage.setItem(LOCAL_VIDEO_KEY, JSON.stringify(list));
+  const list = safeGetLocal<VideoToolItem[]>(LOCAL_VIDEO_KEY, []).filter((v) => v.id !== id);
+  safeSetLocal(LOCAL_VIDEO_KEY, list);
   return true;
 };
 
-// Increment Video Views
 export const incrementOnlineVideoViews = async (id: string): Promise<void> => {
   try {
     fetch(`/api/videos/${id}/view`, { method: 'POST' }).catch(() => {});
@@ -74,17 +96,16 @@ export const incrementOnlineVideoViews = async (id: string): Promise<void> => {
 // --- PROGRAMS ONLINE ---
 export const fetchOnlinePrograms = async (): Promise<ProgramToolItem[]> => {
   try {
-    const res = await fetch('/api/programs');
+    const res = await fetch(`/api/programs?t=${Date.now()}`);
     if (res.ok) {
-      const data = await res.json();
-      localStorage.setItem(LOCAL_PROGRAM_KEY, JSON.stringify(data));
+      const data: ProgramToolItem[] = await res.json();
+      safeSetLocal(LOCAL_PROGRAM_KEY, data);
       return data;
     }
   } catch (err) {
-    console.warn('Online API unavailable, using local cache:', err);
+    console.warn('Online API unavailable for programs, using local cache:', err);
   }
-  const cached = localStorage.getItem(LOCAL_PROGRAM_KEY);
-  return cached ? JSON.parse(cached) : [];
+  return safeGetLocal<ProgramToolItem[]>(LOCAL_PROGRAM_KEY, []);
 };
 
 export const saveOnlineProgram = async (
@@ -101,12 +122,17 @@ export const saveOnlineProgram = async (
       return { success: true };
     }
     const err = await res.json().catch(() => ({}));
-    return { success: false, message: err.error || '保存に失敗しました。' };
+    return { success: false, message: err.error || 'プログラムの保存に失敗しました。' };
   } catch (err) {
     console.warn('Failed to post program online, saving locally', err);
-    const list = getLocalPrograms();
-    list.unshift(program);
-    localStorage.setItem(LOCAL_PROGRAM_KEY, JSON.stringify(list));
+    const list = safeGetLocal<ProgramToolItem[]>(LOCAL_PROGRAM_KEY, []);
+    const existingIdx = list.findIndex((p) => p.id === program.id);
+    if (existingIdx >= 0) {
+      list[existingIdx] = program;
+    } else {
+      list.unshift(program);
+    }
+    safeSetLocal(LOCAL_PROGRAM_KEY, list);
     return { success: true };
   }
 };
@@ -117,13 +143,14 @@ export const deleteOnlineProgram = async (id: string, authorName: string): Promi
       method: 'DELETE',
     });
     if (res.ok) {
+      await fetchOnlinePrograms();
       return true;
     }
   } catch (err) {
     console.warn('Failed to delete program online', err);
   }
-  const list = getLocalPrograms().filter((p) => p.id !== id);
-  localStorage.setItem(LOCAL_PROGRAM_KEY, JSON.stringify(list));
+  const list = safeGetLocal<ProgramToolItem[]>(LOCAL_PROGRAM_KEY, []).filter((p) => p.id !== id);
+  safeSetLocal(LOCAL_PROGRAM_KEY, list);
   return true;
 };
 
@@ -132,22 +159,3 @@ export const incrementOnlineProgramViews = async (id: string): Promise<void> => 
     fetch(`/api/programs/${id}/view`, { method: 'POST' }).catch(() => {});
   } catch {}
 };
-
-// Synchronous local helpers
-function getLocalVideos(): VideoToolItem[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_VIDEO_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function getLocalPrograms(): ProgramToolItem[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_PROGRAM_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}

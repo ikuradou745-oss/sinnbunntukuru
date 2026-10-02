@@ -393,10 +393,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
       return;
     }
 
-    saveCurrentCanvasToFrames();
+    // Capture current frame synchronously
+    const canvas = canvasRef.current;
+    const currentUrl = canvas ? canvas.toDataURL('image/png') : frames[currentFrameIndex];
+    const finalFrames = [...frames];
+    finalFrames[currentFrameIndex] = currentUrl;
+    setFrames(finalFrames);
 
     const videoItem: VideoToolItem = {
-      id: 'vid-' + Date.now(),
+      id: 'vid-' + Date.now() + '-' + Math.floor(Math.random() * 10000),
       type: 'video',
       title: trimmed,
       author: {
@@ -409,7 +414,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({
       height: 64,
       totalFrames,
       frameRate: 10,
-      frames: frames.slice(0, totalFrames),
+      frames: finalFrames.slice(0, totalFrames),
     };
 
     const res = await saveOnlineVideo(videoItem);
